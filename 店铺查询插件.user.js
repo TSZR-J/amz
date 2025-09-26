@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.5
+// @version      1.0.6
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -226,18 +226,59 @@
     //         childList: true,
     //         subtree: true
     //     });
-    document.querySelectorAll('li').forEach(item => {
-        item.addEventListener('click', (event) => {
-            const asin = event.target.closest('li').getAttribute('data-asin');
+    // 监听SKU变化
+    document.addEventListener('click', (event) => {
+        const target = event.target;
+        // 元素类型检测
+        const elementInfo = {
+            tagName: target.tagName,
+            id: target.id || '无ID',
+            classList: target.classList.value || '无class',
+            href: target.href || '非链接元素'
+        };
+
+        // 控制台输出点击信息
+        console.group('点击事件详情');
+        console.log('触发元素:', target);
+        console.log('元素类型:', elementInfo.tagName);
+        console.log('元素标识:', {
+            id: elementInfo.id,
+            class: elementInfo.classList
+        });
+        console.groupEnd();
+        let asin=null;
+        if (target.tagName === 'INPUT' || target.tagName === 'BUTTON') {
+            asin = target.closest('li').getAttribute('data-asin');
             console.log('Selected ASIN:', asin); // 输出: B0DL5VZMV3
             if(asin)
             {
                 asinStr = asin;
                 main();
+                return;
             }
-        });
-    });
+            asin = target.closest('li').getAttribute('data-csa-c-item-id');
+            console.log('Selected ASIN:', asin); // 输出: B0DL5VZMV3
+            if(asin)
+            {
+                asinStr = asin;
+                main();
+                return;
+            }}
 
+        // 特殊元素处理
+        if (target.tagName === 'A') {
+            asin = extractPatternString(target.getAttribute('data-value'));
+            console.log('Selected ASIN:', asin); // 输出: B0DL5VZMV3
+            if(asin)
+            {
+                asinStr = asin;
+                main();
+                return;
+            }
+        }
+
+
+    });
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
