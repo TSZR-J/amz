@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.4
+// @version      1.0.5
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -13,6 +13,10 @@
 
 (function() {
     'use strict';
+    //解析国家
+    const domain = new URL(window.location.href).hostname
+    //解析asin码
+    let asinStr = extractPatternString(window.location.href);
     function findChineseNames(inputStr) {
         const matches = [];
 
@@ -203,11 +207,17 @@
         targetElement.parentNode.insertBefore(btn, targetElement);
     }
 
-    // 使用MutationObserver监听DOM变化
+    //     // 使用MutationObserver监听DOM变化
     //     const observer = new MutationObserver(function(mutations) {
     //         mutations.forEach(function(mutation) {
     //             if (!document.getElementById(TARGET_ID)) return;
-    //             injectButton();
+    //             const targetElement = document.getElementById(TARGET_ID);
+    //             //检查是否已存在注入按钮
+    //             if (targetElement.previousElementSibling &&
+    //                 targetElement.previousElementSibling.classList.contains('injected-btn')) {
+    //                 return;
+    //             }
+    //             main();
     //         });
     //     });
 
@@ -216,6 +226,18 @@
     //         childList: true,
     //         subtree: true
     //     });
+    document.querySelectorAll('li').forEach(item => {
+        item.addEventListener('click', (event) => {
+            const asin = event.target.closest('li').getAttribute('data-asin');
+            console.log('Selected ASIN:', asin); // 输出: B0DL5VZMV3
+            if(asin)
+            {
+                asinStr = asin;
+                main();
+            }
+        });
+    });
+
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
@@ -225,10 +247,6 @@
         await sleep(1000); // 延迟1秒
         console.log('1秒后执行');
         console.log(window.location.href);
-        //解析国家
-        const domain = new URL(window.location.href).hostname
-        //解析asin码
-        let asinStr = extractPatternString(window.location.href);
         console.log('获取到的ASIN为:', asinStr);
         if(!asinStr)
         {
