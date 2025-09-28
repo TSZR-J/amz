@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.6
+// @version      1.0.7
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -196,7 +196,7 @@
 
     // 主执行函数
     function injectButton(style) {
-        const targetElement = document.getElementById(TARGET_ID);
+        const targetElement = document.querySelector('#productTitle.a-size-large.product-title-word-break');
         //检查是否已存在注入按钮
         if (targetElement.previousElementSibling &&
             targetElement.previousElementSibling.classList.contains('injected-btn')) {
