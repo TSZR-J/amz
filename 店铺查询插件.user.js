@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.7
+// @version      1.0.8
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -94,7 +94,7 @@
         "jiangzhengzhengvu8ne;蒋争争",
         "chenxikunbune;陈西堃",
         "niehongrongbune;聂洪荣",
-        "zhangwenjingbune;张文菁",
+        //"zhangwenjingbune;张文菁",
         "JiYuanShiChuanXiaoShuMaK;郝二德",
         "KaiFengJinHuiFuZhuangYouXianGongSi;陆书师",
         "chenxilanawdaw;陈锡岚",
