@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.8
+// @version      1.0.9
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -296,6 +296,19 @@
         }
         (async function() {
             try {
+                //判断是否当前卖家是自家店铺
+                const element = document.getElementById('sellerProfileTriggerId');
+                if (element) {
+                    const textContent = element.textContent;
+                    let name = findChineseNames(textContent);
+                    if(name)
+                    {
+                        BUTTON_CONFIG_C.text = name;
+                        // 初始执行
+                        injectButton(BUTTON_CONFIG_C);
+                        return;
+                    }
+                }
                 console.info(`https://${domain}/gp/product/ajax/aodAjaxMain/ref=aod_page_1?asin=${asinStr}&pc=dp&isonlyrenderofferlist=true&pageno=1`);
                 const response = await syncXmlRequest({
                     method: "GET",
@@ -338,19 +351,6 @@
                         // 初始执行
                         injectButton(BUTTON_CONFIG_C);
                         return;
-                    }
-                    //判断是否当前卖家是自家店铺
-                    const element = document.getElementById('sellerProfileTriggerId');
-                    if (element) {
-                        const textContent = element.textContent;
-                        name = findChineseNames(textContent);
-                        if(name)
-                        {
-                            BUTTON_CONFIG_C.text = name;
-                            // 初始执行
-                            injectButton(BUTTON_CONFIG_C);
-                            return;
-                        }
                     }
                     //调用接口判断是否自家店铺
                     const url = `https://${domain}/gp/product/ajax/aodAjaxMain/ref=dp_aod_NEW_mbc?asin=${asinStr}&m=&qid=&smid=&sourcecustomerorglistid=&sourcecustomerorglistitemid=&sr=&pc=dp`;
