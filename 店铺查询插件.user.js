@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.9
+// @version      1.0.10
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -85,7 +85,7 @@
         "baolinan;郁新林",
         "huayubusiness;王华宇",
         "pentastyt;彭雄",
-        "zhongxiangshizhenshiping;李海鹏",
+        "zhongxiangshizhenshipingshangmaoyouxiangongsi;李海鹏",
         "xiafaster-uk;夏银雪",
         "guangzhouhuiwushangmaoshanghang;杨栋奥",
         "suyingshangmao8888;彭水香",
