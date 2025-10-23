@@ -212,7 +212,6 @@ function getSalesData(jsonStr) {
             }
         });
     }
-init();
     // 5. 页面加载完成后执行
-    window.addEventListener('load',  init);
+    window.addEventListener('load', init);
 })();
