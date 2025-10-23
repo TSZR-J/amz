@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         各国销量查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.0
+// @version      1.0.1
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/各国销量查询插件.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/各国销量查询插件.user.js
 // @match        *://*/*
 // @grant         GM.xmlHttpRequest
+// @connect amazon.zying.net
 // ==/UserScript==
 
 (function() {
