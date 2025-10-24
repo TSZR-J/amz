@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         各国销量查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.1
+// @version      1.0.2
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/各国销量查询插件.user.js
@@ -172,8 +172,7 @@ for (let i = 0; i < amazonSites.length; i++) {
     }
 
     // 解析并提取 sales 字段的函数
-function getSalesData(jsonStr) {
-  const data = JSON.parse(jsonStr);
+function getSalesData(data) {
     //console.log(" 解析结果:", data); // 输出: 28
       let sales =0;
     if(data.data.list.length>0)
@@ -201,8 +200,14 @@ function getSalesData(jsonStr) {
             }),
             onload: function(response) {
                 //console.log(`API  response for ASIN ${asin}:`, response.responseText);
+                let data = JSON.parse(response.responseText);
+                if(data.code === 401)
+                {
+                    addAsinLabel("_blank",item, asin,'智赢插件登录失效，请退出重新登录',0);
+                    return;
+                }
                 // 执行解析并打印结果
-                const salesValue = getSalesData(response.responseText);
+                const salesValue = getSalesData(data);
                // console.log(`销量:`, salesValue);
                             // 添加蓝色ASIN标签
                 addAsinLabel(amazonSites.add,item, asin,amazonSites.name,salesValue);
