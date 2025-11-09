@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.13
+// @version      1.0.14
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -115,33 +115,33 @@
     ];
 
     // 创建亚马逊站点数据数组
-    const amazonSites = [
-        {
-            add: "https://www.amazon.it/dp/",
-            name: "意大利",
-            code: "IT"
-        },
-        {
-            add: "https://www.amazon.fr/dp/",
-            name: "法国",
-            code: "FR"
-        },
-        {
-            add: "https://www.amazon.co.uk/dp/",
-            name: "英国",
-            code: "GB"
-        },
-        {
-            add: "https://www.amazon.de/dp/",
-            name: "德国",
-            code: "DE"
-        },
-        {
-            add: "https://www.amazon.es/dp/",
-            name: "西班牙",
-            code: "ES"
-        }
-    ];
+const amazonSites = [
+    {
+        add: "https://www.amazon.it/dp/",
+        name: "意大利(IT)",
+        code: "IT"
+    },
+    {
+        add: "https://www.amazon.fr/dp/",
+        name: "法国(FR)",
+        code: "FR"
+    },
+    {
+        add: "https://www.amazon.co.uk/dp/",
+        name: "英国(GB)",
+        code: "GB"
+    },
+    {
+        add: "https://www.amazon.de/dp/",
+        name: "德国(DE)",
+        code: "DE"
+    },
+    {
+        add: "https://www.amazon.es/dp/",
+        name: "西班牙(ES)",
+        code: "ES"
+    }
+];
 
     const API_URL = 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list';
 
