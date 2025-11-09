@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.12
+// @version      1.0.13
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -335,6 +335,10 @@
         return btn;
     }
 
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
     // 主执行函数
     function injectButton(style) {
         const targetElement = document.querySelector('#productTitle.a-size-large.product-title-word-break');
@@ -420,13 +424,10 @@
 
 
     });
-    function sleep(ms) {
-        return new Promise(resolve => setTimeout(resolve, ms));
-    }
 
     async function main() {
         console.log('开始执行');
-        await sleep(1000); // 延迟1秒
+        await sleep(3500); // 延迟1秒
         console.log('1秒后执行');
         console.log(window.location.href);
         console.log('获取到的ASIN为:', asinStr);
