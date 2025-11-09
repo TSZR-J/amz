@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         各国销量查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.2
+// @version      1.0.3
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/各国销量查询插件.user.js
@@ -13,6 +13,10 @@
 
 (function() {
     'use strict';
+
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
  // 监听SKU变化
     document.addEventListener('click', (event) => {
         const target = event.target;
@@ -36,52 +40,52 @@
         let asin=null;
         if (target.classList.value === 's-pagination-item s-pagination-previous s-pagination-button s-pagination-button-accessibility s-pagination-separator') {
            console.log("上一页");
-            setTimeout(init, 1500);
+            setTimeout(init, 3500);
         }
         if (target.classList.value === 's-pagination-item s-pagination-next s-pagination-button s-pagination-button-accessibility s-pagination-separator') {
            console.log("下一页");
-            setTimeout(init, 1500);
+            setTimeout(init, 3500);
         }
         if (target.classList.value === 's-pagination-item s-pagination-button s-pagination-button-accessibility') {
            console.log("数字");
-            setTimeout(init, 1500);
+            setTimeout(init, 3500);
         }
         if(target.classList.value ==='a-dropdown-link')
         {
              console.log("下拉框");
-          setTimeout(init, 1500);
+          setTimeout(init, 3500);
         }
        if(target.classList.value ==='a-dropdown-link a-active')
         {
           console.log("下拉框");
-          setTimeout(init, 1500);
+          setTimeout(init, 3500);
         }
     });
     // 创建亚马逊站点数据数组
 const amazonSites = [
     {
         add: "https://www.amazon.it/dp/",
-        name: "意大利",
+        name: "意大利(IT)",
         code: "IT"
     },
     {
         add: "https://www.amazon.fr/dp/",
-        name: "法国",
+        name: "法国(FR)",
         code: "FR"
     },
     {
         add: "https://www.amazon.co.uk/dp/",
-        name: "英国",
+        name: "英国(GB)",
         code: "GB"
     },
     {
         add: "https://www.amazon.de/dp/",
-        name: "德国",
+        name: "德国(DE)",
         code: "DE"
     },
     {
         add: "https://www.amazon.es/dp/",
-        name: "西班牙",
+        name: "西班牙(ES)",
         code: "ES"
     }
 ];
@@ -91,7 +95,7 @@ const amazonSites = [
 
     // 2. 核心功能实现
     function init() {
-
+        sleep(3500); // 延迟1秒
         // 获取所有role为listitem的div
         const listItems = document.querySelectorAll('div[role="listitem"]');
         if (listItems.length  === 0) {
