@@ -2,13 +2,14 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.11
+// @version      1.0.12
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
 // @match        *://*/*
 // @grant         GM.xmlHttpRequest
+// @connect amazon.zying.net
 // ==/UserScript==
 
 (function() {
@@ -109,8 +110,148 @@
         "meiyongqiugdjsa;梅咏秋",
         "SHULEI0915;舒蕾",
         "HuangQianAHHA;黄黔",
-        "chongyixianchangqingnongzijingxiaodian;刘常青"
+        "chongyixianchangqingnongzijingxiaodian;刘常青",
+        "HAOHAN888888;刘浩瀚"
     ];
+
+    // 创建亚马逊站点数据数组
+    const amazonSites = [
+        {
+            add: "https://www.amazon.it/dp/",
+            name: "意大利",
+            code: "IT"
+        },
+        {
+            add: "https://www.amazon.fr/dp/",
+            name: "法国",
+            code: "FR"
+        },
+        {
+            add: "https://www.amazon.co.uk/dp/",
+            name: "英国",
+            code: "GB"
+        },
+        {
+            add: "https://www.amazon.de/dp/",
+            name: "德国",
+            code: "DE"
+        },
+        {
+            add: "https://www.amazon.es/dp/",
+            name: "西班牙",
+            code: "ES"
+        }
+    ];
+
+    const API_URL = 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list';
+
+    // 2. 核心功能实现
+    function sale() {
+        // 获取所有role为listitem的div
+        const listItems = document.querySelector('#productTitle.a-size-large.product-title-word-break');
+        if (!listItems) {
+            return;
+        }
+
+        // 使用for循环输出
+        for (let i = 0; i < amazonSites.length; i++) {
+            sendAsinRequest(amazonSites[i],listItems,asinStr);
+        }
+    }
+
+    // 3. 添加美观的蓝色ASIN标签
+    function addAsinLabel(arr,element, asin,name,sales) {
+        const labelStyle_g = `
+        display: inline-block;
+        padding: 2px 8px;
+        margin-right: 8px;
+        background-color: #22C55E;
+        color: white;
+        font-size: 12px;
+        font-weight: bold;
+        border-radius: 4px;
+        vertical-align: middle;
+        text-decoration: none;  // 添加此行去除下划线
+    `;
+
+        const labelStyle_r = `
+        display: inline-block;
+        padding: 2px 8px;
+        margin-right: 8px;
+        background-color: #94A3B8;
+        color: white;
+        font-size: 12px;
+        font-weight: bold;
+        border-radius: 4px;
+        vertical-align: middle;
+        text-decoration: none;  // 添加此行去除下划线
+    `;
+        // 创建a标签并设置跳转链接
+        const label = document.createElement('a');
+        label.href = arr+asin; // 跳转到百度搜索ASIN
+        label.target = '_blank'; // 在新标签页打开
+        if(sales>0)
+        {
+            label.style.cssText = labelStyle_g;
+        }
+        else
+        {
+            label.style.cssText = labelStyle_r;
+        }
+        label.textContent = ` ${name}销量: ${sales}`;
+
+        // 在元素最前面插入标签
+        if (element.firstChild) {
+            element.insertBefore(label, element.firstChild);
+        } else {
+            element.appendChild(label);
+        }
+    }
+
+    // 解析并提取 sales 字段的函数
+    function getSalesData(data) {
+        //console.log(" 解析结果:", data); // 输出: 28
+        let sales =0;
+        if(data.data.list.length>0)
+        {
+            sales = data.data.list[0].sales;
+            //console.log(" 解析结果:", sales); // 输出: 28
+        }
+
+        return sales;
+    }
+    function sendAsinRequest(amazonSites,item, asin) {
+        GM.xmlHttpRequest({
+            method: 'POST',
+            url: 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': document.cookie
+            },
+            data: JSON.stringify({
+                abbr: amazonSites.code,
+                pagesize: 100,
+                keys: [asin]
+            }),
+            onload: function(response) {
+                //console.log(`API  response for ASIN ${asin}:`, response.responseText);
+                let data = JSON.parse(response.responseText);
+                if(data.code === 401)
+                {
+                    addAsinLabel("_blank",item, asin,'智赢插件登录失效，请退出重新登录',0);
+                    return;
+                }
+                // 执行解析并打印结果
+                const salesValue = getSalesData(data);
+                // console.log(`销量:`, salesValue);
+                // 添加蓝色ASIN标签
+                addAsinLabel(amazonSites.add,item, asin,amazonSites.name,salesValue);
+            },
+            onerror: function(error) {
+                console.error(`Request  failed for ASIN ${asin}:`, error);
+            }
+        });
+    }
     // 目标元素ID
     const TARGET_ID = 'productTitle';
     // 按钮配置
@@ -321,6 +462,11 @@
                 if (inputElement) {
                     const value = inputElement.value;
                     console.log('获取到的卖家数为:', value);
+                    if(value&&value==0)
+                    {
+                        injectButton(BUTTON_CONFIG_A);
+                        return;
+                    }
                     // 计算循环次数（向上取整）
                     const loopCount = Math.ceil(value / 10);
                     const ariaLabels = [];
@@ -385,7 +531,8 @@
                 console.error('请求处理失败:', error);
             }
         })();
+        //获取当前asin各国销量
+        sale();
     }
     main();
-
 })();
