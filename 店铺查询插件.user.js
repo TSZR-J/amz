@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.14
+// @version      1.0.15
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -10,12 +10,35 @@
 // @match        *://*/*
 // @grant         GM.xmlHttpRequest
 // @connect amazon.zying.net
+// @require      https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js
+// @grant        GM_setValue
+// @grant        GM_getValue
 // ==/UserScript==
 
 (function() {
     'use strict';
     //解析国家
-    const domain = new URL(window.location.href).hostname
+    const domain = new URL(window.location.href).hostname;
+    function removeQuotes(str) {
+    if (typeof str !== 'string') {
+        return str;
+    }
+
+    // 去除开头和结尾的引号
+    if (str.startsWith('"') && str.endsWith('"')) {
+        return str.slice(1, -1);
+    }
+
+    return str;
+}
+    let token;
+    //判断是否智赢链接
+    if(domain=='amazon.zying.net')
+    {
+      token = localStorage.getItem("token");
+      GM_setValue("token", removeQuotes(token));
+    }
+
     //解析asin码
     let asinStr = extractPatternString(window.location.href);
     function findChineseNames(inputStr) {
@@ -115,33 +138,33 @@
     ];
 
     // 创建亚马逊站点数据数组
-const amazonSites = [
-    {
-        add: "https://www.amazon.it/dp/",
-        name: "意大利(IT)",
-        code: "IT"
-    },
-    {
-        add: "https://www.amazon.fr/dp/",
-        name: "法国(FR)",
-        code: "FR"
-    },
-    {
-        add: "https://www.amazon.co.uk/dp/",
-        name: "英国(GB)",
-        code: "GB"
-    },
-    {
-        add: "https://www.amazon.de/dp/",
-        name: "德国(DE)",
-        code: "DE"
-    },
-    {
-        add: "https://www.amazon.es/dp/",
-        name: "西班牙(ES)",
-        code: "ES"
-    }
-];
+    const amazonSites = [
+        {
+            add: "https://www.amazon.it/dp/",
+            name: "意大利(IT)",
+            code: "IT"
+        },
+        {
+            add: "https://www.amazon.fr/dp/",
+            name: "法国(FR)",
+            code: "FR"
+        },
+        {
+            add: "https://www.amazon.co.uk/dp/",
+            name: "英国(GB)",
+            code: "GB"
+        },
+        {
+            add: "https://www.amazon.de/dp/",
+            name: "德国(DE)",
+            code: "DE"
+        },
+        {
+            add: "https://www.amazon.es/dp/",
+            name: "西班牙(ES)",
+            code: "ES"
+        }
+    ];
 
     const API_URL = 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list';
 
@@ -221,24 +244,46 @@ const amazonSites = [
         return sales;
     }
     function sendAsinRequest(amazonSites,item, asin) {
+        //获取token
+        let Token =GM_getValue("token", "");
+        //获取时间戳
+        let Timestamp = Math.round(new Date().getTime() / 1e3).toString();
+        //获取data
+        let data = JSON.stringify({
+            abbr: amazonSites.code,
+            pagesize: 100,
+            keys: [asin]
+        });
+        //获取版本
+        let Version = "v1";
+        //获取url
+        let post_url = "https://amazon.zying.net";
+        //获取请求方法
+        let post_method = "POST"
+        //组装验签字符串
+        let Signature = data+post_method+"/api/CmdHandler?cmd=zscout_asin.list"+Timestamp+Token+Version;
+        //验签
+        Signature = CryptoJS.HmacSHA256(Signature, post_url).toString(CryptoJS.enc.Hex);
+        //
+
         GM.xmlHttpRequest({
             method: 'POST',
             url: 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list',
             headers: {
                 'Content-Type': 'application/json',
-                'Cookie': document.cookie
+                'Cookie': document.cookie,
+                'Token':Token,
+                'Version':Version,
+                'Signature':Signature,
+                'Timestamp':Timestamp
             },
-            data: JSON.stringify({
-                abbr: amazonSites.code,
-                pagesize: 100,
-                keys: [asin]
-            }),
+            data: data,
             onload: function(response) {
                 //console.log(`API  response for ASIN ${asin}:`, response.responseText);
                 let data = JSON.parse(response.responseText);
                 if(data.code === 401)
                 {
-                    addAsinLabel("_blank",item, asin,'智赢插件登录失效，请退出重新登录',0);
+                    addAsinLabel("https://amazon.zying.net/#/bigData",item, asin,'智赢插件登录失效，请跳转重新登录',0);
                     return;
                 }
                 // 执行解析并打印结果
