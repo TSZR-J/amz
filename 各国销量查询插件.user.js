@@ -1,14 +1,17 @@
 // ==UserScript==
 // @name         各国销量查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.3
-// @description  查询是否有跟卖店铺
+// @version      1.0.5
+// @description  查询各国销量
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/各国销量查询插件.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/各国销量查询插件.user.js
 // @match        *://*/*
 // @grant         GM.xmlHttpRequest
 // @connect amazon.zying.net
+// @require      https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js
+// @grant        GM_setValue
+// @grant        GM_getValue
 // ==/UserScript==
 
 (function() {
@@ -16,6 +19,27 @@
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    //解析国家
+    const domain = new URL(window.location.href).hostname;
+    function removeQuotes(str) {
+    if (typeof str !== 'string') {
+        return str;
+    }
+
+    // 去除开头和结尾的引号
+    if (str.startsWith('"') && str.endsWith('"')) {
+        return str.slice(1, -1);
+    }
+
+    return str;
+}
+    let token;
+    //判断是否智赢链接
+    if(domain=='amazon.zying.net')
+    {
+      token = localStorage.getItem("token");
+      GM_setValue("token", removeQuotes(token));
     }
  // 监听SKU变化
     document.addEventListener('click', (event) => {
@@ -189,25 +213,46 @@ function getSalesData(data) {
 }
 
         // 发送API请求函数
-    function sendAsinRequest(amazonSites,item, asin) {
+    function sendAsinRequest(amazonSites,item, asin) {//获取token
+        let Token =GM_getValue("token", "");
+        //获取时间戳
+        let Timestamp = Math.round(new Date().getTime() / 1e3).toString();
+        //获取data
+        let data = JSON.stringify({
+            abbr: amazonSites.code,
+            pagesize: 100,
+            keys: [asin]
+        });
+        //获取版本
+        let Version = "v1";
+        //获取url
+        let post_url = "https://amazon.zying.net";
+        //获取请求方法
+        let post_method = "POST"
+        //组装验签字符串
+        let Signature = data+post_method+"/api/CmdHandler?cmd=zscout_asin.list"+Timestamp+Token+Version;
+        //验签
+        Signature = CryptoJS.HmacSHA256(Signature, post_url).toString(CryptoJS.enc.Hex);
+        //
+
         GM.xmlHttpRequest({
             method: 'POST',
             url: 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list',
             headers: {
                 'Content-Type': 'application/json',
-                'Cookie': document.cookie
+                'Cookie': document.cookie,
+                'Token':Token,
+                'Version':Version,
+                'Signature':Signature,
+                'Timestamp':Timestamp
             },
-            data: JSON.stringify({
-                abbr: amazonSites.code,
-                pagesize: 100,
-                keys: [asin]
-            }),
+            data: data,
             onload: function(response) {
                 //console.log(`API  response for ASIN ${asin}:`, response.responseText);
                 let data = JSON.parse(response.responseText);
                 if(data.code === 401)
                 {
-                    addAsinLabel("_blank",item, asin,'智赢插件登录失效，请退出重新登录',0);
+                    addAsinLabel("https://amazon.zying.net/#/bigData",item, asin,'智赢插件登录失效，请跳转重新登录',0);
                     return;
                 }
                 // 执行解析并打印结果
