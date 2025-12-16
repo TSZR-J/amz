@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.15
+// @version      1.0.16
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -125,16 +125,20 @@
         "yunnanhengchengjiaoyuzixunyouxiangongsi;白朝林",
         "wangruiawdaw;王锐",
         "fengxinfanchenhuanjingfuwuyouxiangongsi;左咸利",
-        "panfeihedbgj;潘菲",
+        //"panfeihedbgj;潘菲",
         "KaiFengJuNiuJiXieSheBeiZuLinYouXianGongSi;魏然",
         "jiangxisijiyouxicanyinyouxiangongsi;王新凤",
         "HuGuanXianGanShengJianZhuYouXianGongSi;李熙乾",
-        "zhangzijunksdha;张子俊",
+        //"zhangzijunksdha;张子俊",
         "meiyongqiugdjsa;梅咏秋",
         "SHULEI0915;舒蕾",
         "HuangQianAHHA;黄黔",
         "chongyixianchangqingnongzijingxiaodian;刘常青",
-        "HAOHAN888888;刘浩瀚"
+        "HAOHAN888888;刘浩瀚",
+        "JINGPING888888;刘景平",
+        "LINXIU888888;陈林秀",
+        "huangshaomei888888;黄绍梅",
+        "liaochunhua888888;廖春花"
     ];
 
     // 创建亚马逊站点数据数组
@@ -582,3 +586,4 @@
     }
     main();
 })();
+
