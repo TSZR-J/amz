@@ -488,9 +488,9 @@
 
         // 按钮数据配置
         const buttonsConfig = [
-            { id: 'locate-prev', text: '定位需调价商品', onClick: handleLocatePrev },
+            { id: 'locate-prev', text: '定位下一个需调价商品', onClick: handleLocatePrev },
             { id: 'auto-adjust', text: '自动调价', onClick: handleAutoAdjust },
-            { id: 'locate-next', text: '滚动下一页', onClick: handleLocateNext },
+            { id: 'locate-next', text: '滚动到最底部', onClick: handleLocateNext },
             { id: 'inspection-registration', text: '校验本国注册', onClick: inspectionRegistration }
         ];
 
