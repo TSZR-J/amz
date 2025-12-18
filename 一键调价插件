@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         一键调价插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.3
+// @version      1.0.4
 // @description  获取当前需调价的商品
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/一键调价插件.user.js
@@ -10,113 +10,313 @@
 // @match        *://*/*
 // @grant         GM.xmlHttpRequest
 // @connect amazon.zying.net
+// @require      https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js
+// @grant        GM_setValue
+// @grant        GM_getValue
 // ==/UserScript==
 
 (function() {
     'use strict';
-let currentScrollIndex = 0;
-let isScrolling = false;
 
-function cycleScrollToRedCross() {
-    if (isScrolling) return;
+    function sleep(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    //解析国家
+    const domain = new URL(window.location.href).hostname;
+    function removeQuotes(str) {
+        if (typeof str !== 'string') {
+            return str;
+        }
 
-    const elements = document.querySelectorAll('.JanusReferencePrice-module__redCross--8YkaC');
+        // 去除开头和结尾的引号
+        if (str.startsWith('"') && str.endsWith('"')) {
+            return str.slice(1, -1);
+        }
 
-    if (elements.length === 0) {
-       showNotification("未找到需调价的商品");
-        return;
+        return str;
+    }
+    let token;
+    //判断是否智赢链接
+    if(domain=='amazon.zying.net')
+    {
+        token = localStorage.getItem("token");
+        GM_setValue("token", removeQuotes(token));
     }
 
-    // 如果当前索引超出范围，重置为0
-    if (currentScrollIndex >= elements.length) {
-        currentScrollIndex = 0;
-    }
+    // 创建亚马逊站点数据数组
+    const amazonSites = [
+        {
+            add: "https://www.amazon.it/dp/",
+            name: "意大利(IT)",
+            code: "IT"
+        },
+        {
+            add: "https://www.amazon.fr/dp/",
+            name: "法国(FR)",
+            code: "FR"
+        },
+        {
+            add: "https://www.amazon.co.uk/dp/",
+            name: "英国(GB)",
+            code: "GB"
+        },
+        {
+            add: "https://www.amazon.de/dp/",
+            name: "德国(DE)",
+            code: "DE"
+        },
+        {
+            add: "https://www.amazon.es/dp/",
+            name: "西班牙(ES)",
+            code: "ES"
+        }
+    ];
+    // 1. 配置区域 - 请根据实际页面调整选择器
+    const API_URL = 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list';
 
-    const element = elements[currentScrollIndex];
-    if (!element) return;
-
-    // 清除之前的高亮
-    elements.forEach(el => {
-        el.style.boxShadow = '';
-        el.style.transition = '';
-    });
-
-    const elementRect = element.getBoundingClientRect();
-    const currentScrollY = window.pageYOffset || document.documentElement.scrollTop;
-
-    // 计算目标滚动位置（元素垂直居中显示）
-    const targetScrollY = elementRect.top + currentScrollY - (window.innerHeight / 2) + (elementRect.height / 2);
-
-    // 执行平滑滚动动画
-    isScrolling = true;
-    const startTime = performance.now();
-    const duration = 800;
-
-    function animateScroll(currentTime) {
-        const elapsed = currentTime - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-
-        // 使用缓动函数使滚动更自然
-        const easeOutCubic = 1 - Math.pow(1 - progress, 3);
-
-        const newScrollY = currentScrollY + (targetScrollY - currentScrollY) * easeOutCubic;
-
-        window.scrollTo(0, newScrollY);
-
-        if (progress < 1) {
-            requestAnimationFrame(animateScroll);
-        } else {
-            // 滚动完成后高亮当前元素
-            element.style.boxShadow = '0 0 0 3px #007bff, 0 0 20px rgba(0, 123, 255, 0.3)';
-            element.style.transition = 'box-shadow 0.3s ease';
-            isScrolling = false;
-
-            // 更新索引，准备下一次点击
-            currentScrollIndex = (currentScrollIndex + 1) % elements.length;
+    // 2. 核心功能实现
+    function init() {
+        const skuDivs = document.querySelectorAll('div[data-sku]');
+        let asins = [];
+        let skuMap = new Map();
+        skuDivs.forEach(item => {
+            const skuValue = item.dataset.sku;
+            const mainValue = skuValue.split('-')[0]; // 提取主值部分
+            asins.push(mainValue); // 存储主值
+            skuMap.set(mainValue, item); // 以主值为key，元素为value
+        });
+        // 使用for循环输出
+        // 使用for循环输出
+        for (let i = 0; i < amazonSites.length; i++) {
+            sendAsinRequest(amazonSites[i],skuMap,asins);
         }
     }
 
-    requestAnimationFrame(animateScroll);
-}
-/**
+    // 3. 添加美观的蓝色ASIN标签
+    function addAsinLabel(code,arr,element, asin,name,sales) {
+        const labelStyle_g = `
+        display: inline-block;
+        padding: 2px 8px;
+        margin-right: 8px;
+        background-color: #22C55E;
+        color: white;
+        font-size: 12px;
+        font-weight: bold;
+        border-radius: 4px;
+        vertical-align: middle;
+        text-decoration: none;  // 添加此行去除下划线
+    `;
+
+        const labelStyle_r = `
+        display: inline-block;
+        padding: 2px 8px;
+        margin-right: 8px;
+        background-color: #FF0000;
+        color: white;
+        font-size: 12px;
+        font-weight: bold;
+        border-radius: 4px;
+        vertical-align: middle;
+        text-decoration: none;  // 添加此行去除下划线
+    `;
+        const existingLabel = element.querySelector(`a#${asin+code}inspectionRegistration`);
+        if (existingLabel) existingLabel.remove();
+        // 创建a标签并设置跳转链接
+        const label = document.createElement('a');
+        label.id = asin+code + 'inspectionRegistration'; // 设置唯一ID
+        label.href = arr+asin;  // 跳转到百度搜索ASIN
+        label.target = '_blank';  // 在新标签页打开
+        if(sales==4)
+        {
+            label.style.cssText = labelStyle_r;
+            label.textContent = ` ${name}已注册`;
+        }
+        else
+        {
+            label.style.cssText = labelStyle_g;
+            label.textContent = ` ${name}未注册`;
+        }
+
+
+
+        // 在元素最前面插入标签
+        if (element.firstChild) {
+            element.insertBefore(label, element.firstChild);
+        } else {
+            element.appendChild(label);
+        }
+    }
+
+    // 解析并提取 sales 字段的函数
+    function getSalesData(data) {
+        //console.log(" 解析结果:", data); // 输出: 28
+        let brand_status =0;
+        brand_status= data.brand_status;
+        return brand_status;
+    }
+
+    // 发送API请求函数
+    function sendAsinRequest(amazonSites,skuMap, asin) {//获取token
+        let Token =GM_getValue("token", "");
+        //获取时间戳
+        let Timestamp = Math.round(new Date().getTime() / 1e3).toString();
+        //获取data
+        let data = JSON.stringify({
+            abbr: amazonSites.code,
+            pagesize: 100,
+            keys: asin
+        });
+        //获取版本
+        let Version = "v1";
+        //获取url
+        let post_url = "https://amazon.zying.net";
+        //获取请求方法
+        let post_method = "POST"
+        //组装验签字符串
+        let Signature = data+post_method+"/api/CmdHandler?cmd=zscout_asin.list"+Timestamp+Token+Version;
+        //验签
+        Signature = CryptoJS.HmacSHA256(Signature, post_url).toString(CryptoJS.enc.Hex);
+        //
+
+        GM.xmlHttpRequest({
+            method: 'POST',
+            url: 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list',
+            headers: {
+                'Content-Type': 'application/json',
+                'Cookie': document.cookie,
+                'Token':Token,
+                'Version':Version,
+                'Signature':Signature,
+                'Timestamp':Timestamp
+            },
+            data: data,
+            onload: function(response) {
+                //console.log(`API  response for ASIN ${asin}:`, response.responseText);
+                let data = JSON.parse(response.responseText);
+                if(data.code === 401)
+                {
+                    addAsinLabel("null","https://amazon.zying.net/#/bigData",skuMap[asin[0]], asin[0],'智赢插件登录失效，请点击跳转重新登录',0);
+                    return;
+                }
+                if(data.data.list.length>0)
+                {
+                    data.data.list.forEach(item => {
+                        // 在这里处理每个item
+                        let brand_status = item.brand_status;
+                        let asin = item.asin
+                        addAsinLabel(amazonSites.code,amazonSites.add,skuMap.get(asin), asin,amazonSites.name,brand_status);
+                    });
+                }
+            },
+            onerror: function(error) {
+                console.error(`Request  failed for ASIN ${asin}:`, error);
+            }
+        });
+    }
+
+    let currentScrollIndex = 0;
+    let isScrolling = false;
+
+    function cycleScrollToRedCross() {
+        if (isScrolling) return;
+
+        const elements = document.querySelectorAll('.JanusReferencePrice-module__redCross--8YkaC');
+
+        if (elements.length === 0) {
+            showNotification("未找到需调价的商品");
+            return;
+        }
+
+        // 如果当前索引超出范围，重置为0
+        if (currentScrollIndex >= elements.length) {
+            currentScrollIndex = 0;
+        }
+
+        const element = elements[currentScrollIndex];
+        if (!element) return;
+
+        // 清除之前的高亮
+        elements.forEach(el => {
+            el.style.boxShadow = '';
+            el.style.transition = '';
+        });
+
+        const elementRect = element.getBoundingClientRect();
+        const currentScrollY = window.pageYOffset || document.documentElement.scrollTop;
+
+        // 计算目标滚动位置（元素垂直居中显示）
+        const targetScrollY = elementRect.top + currentScrollY - (window.innerHeight / 2) + (elementRect.height / 2);
+
+        // 执行平滑滚动动画
+        isScrolling = true;
+        const startTime = performance.now();
+        const duration = 800;
+
+        function animateScroll(currentTime) {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // 使用缓动函数使滚动更自然
+            const easeOutCubic = 1 - Math.pow(1 - progress, 3);
+
+            const newScrollY = currentScrollY + (targetScrollY - currentScrollY) * easeOutCubic;
+
+            window.scrollTo(0, newScrollY);
+
+            if (progress < 1) {
+                requestAnimationFrame(animateScroll);
+            } else {
+                // 滚动完成后高亮当前元素
+                element.style.boxShadow = '0 0 0 3px #007bff, 0 0 20px rgba(0, 123, 255, 0.3)';
+                element.style.transition = 'box-shadow 0.3s ease';
+                isScrolling = false;
+
+                // 更新索引，准备下一次点击
+                currentScrollIndex = (currentScrollIndex + 1) % elements.length;
+            }
+        }
+
+        requestAnimationFrame(animateScroll);
+    }
+    /**
  * 元素循环滚动定位功能
  * 通过单个函数实现所有目标元素的循环定位
  */
-// 滚动到底部功能
-function scrollToBottom() {
-    // 获取当前滚动位置和最大滚动距离
-    const currentScroll = window.pageYOffset || document.documentElement.scrollTop;
-    const maxScroll = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+    // 滚动到底部功能
+    function scrollToBottom() {
+        // 获取当前滚动位置和最大滚动距离
+        const currentScroll = window.pageYOffset || document.documentElement.scrollTop;
+        const maxScroll = document.documentElement.scrollHeight - document.documentElement.clientHeight;
 
-    // 检查是否已经到达底部
-    if (currentScroll >= maxScroll - 10) { // 允许10px的误差
-        showNotification('已到达页面最底部');
-        return;
-    }
-
-    // 执行滚动动画
-    const startTime = performance.now();
-    const duration = 800; // 动画持续时间
-
-    function animateScroll(currentTime) {
-        const elapsed = currentTime - startTime;
-        const progress = Math.min(elapsed / duration, 1);
-
-        // 使用缓动函数使滚动更自然
-        const easeOutQuart = 1 - Math.pow(1 - progress, 4);
-
-        // 计算新的滚动位置
-        const newScroll = currentScroll + (maxScroll - currentScroll) * easeOutQuart;
-
-        window.scrollTo(0, newScroll);
-
-        if (progress < 1) {
-            requestAnimationFrame(animateScroll);
+        // 检查是否已经到达底部
+        if (currentScroll >= maxScroll - 10) { // 允许10px的误差
+            showNotification('已到达页面最底部');
+            return;
         }
-    }
 
-    requestAnimationFrame(animateScroll);
-}
+        // 执行滚动动画
+        const startTime = performance.now();
+        const duration = 800; // 动画持续时间
+
+        function animateScroll(currentTime) {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // 使用缓动函数使滚动更自然
+            const easeOutQuart = 1 - Math.pow(1 - progress, 4);
+
+            // 计算新的滚动位置
+            const newScroll = currentScroll + (maxScroll - currentScroll) * easeOutQuart;
+
+            window.scrollTo(0, newScroll);
+
+            if (progress < 1) {
+                requestAnimationFrame(animateScroll);
+            }
+        }
+
+        requestAnimationFrame(animateScroll);
+    }
     /**
  * 优雅的渐隐提示组件
  * 自动显示并隐藏，无需用户交互
@@ -147,28 +347,28 @@ function scrollToBottom() {
         text-align: center;
     `;
 
-    notification.textContent = message;
-    document.body.appendChild(notification);
+        notification.textContent = message;
+        document.body.appendChild(notification);
 
-    // 显示动画
-    setTimeout(() => {
-        notification.style.transform = 'translateX(0)';
-        notification.style.opacity = '1';
-    }, 10);
-
-    // 自动隐藏
-    setTimeout(() => {
-        notification.style.transform = 'translateX(400px)';
-        notification.style.opacity = '0';
-
-        // 动画结束后移除元素
+        // 显示动画
         setTimeout(() => {
-            if (notification.parentNode) {
-                notification.parentNode.removeChild(notification);
-            }
-        }, 500);
-    }, duration);
-}
+            notification.style.transform = 'translateX(0)';
+            notification.style.opacity = '1';
+        }, 10);
+
+        // 自动隐藏
+        setTimeout(() => {
+            notification.style.transform = 'translateX(400px)';
+            notification.style.opacity = '0';
+
+            // 动画结束后移除元素
+            setTimeout(() => {
+                if (notification.parentNode) {
+                    notification.parentNode.removeChild(notification);
+                }
+            }, 500);
+        }, duration);
+    }
 
     function autoAdjustPrice() {
         // 获取所有符合条件的表格单元格
@@ -214,7 +414,7 @@ function scrollToBottom() {
             const priceInputs = cell.querySelectorAll('kat-input-group');
             // 获取当前价格
             let currentPrice = parseFloat(priceInputs[0].childNodes[1].value)||0;
-           // 获取最低价格
+            // 获取最低价格
             let minPrice = parseFloat(priceInputs[1].childNodes[1].value) || 0;
 
             // 判断当前价格是否大于推荐报价
@@ -227,13 +427,13 @@ function scrollToBottom() {
                 }
                 priceInputs[0].childNodes[1].value = newPrice.toFixed(2);
 
-                    // 触发输入事件以确保UI更新
-                    const inputEvent = new Event('input', { bubbles: true });
-                    priceInputs[0].childNodes[1].dispatchEvent(inputEvent);
+                // 触发输入事件以确保UI更新
+                const inputEvent = new Event('input', { bubbles: true });
+                priceInputs[0].childNodes[1].dispatchEvent(inputEvent);
 
-                    // 触发change事件
-                    const changeEvent = new Event('change', { bubbles: true });
-                   priceInputs[0].childNodes[1].dispatchEvent(changeEvent);
+                // 触发change事件
+                const changeEvent = new Event('change', { bubbles: true });
+                priceInputs[0].childNodes[1].dispatchEvent(changeEvent);
             }
             i=i+1;
         });
@@ -243,33 +443,33 @@ function scrollToBottom() {
         }
         else
         {
-              showNotification(`未找到需要调价的商品`);
+            showNotification(`未找到需要调价的商品`);
         }
     }
 
     // 导航
-// 检测URL并创建悬浮按钮
-function initInventoryAssistant() {
-    // 检查当前URL是否包含目标路径
-    const currentUrl = window.location.href;
-    const targetPath = 'myinventory/inventory';
+    // 检测URL并创建悬浮按钮
+    function initInventoryAssistant() {
+        // 检查当前URL是否包含目标路径
+        const currentUrl = window.location.href;
+        const targetPath = 'myinventory/inventory';
 
-    if (currentUrl.includes(targetPath)) {
-        createFloatingButtons();
-        console.log('商品管理助手已启用 - 检测到目标页面');
-    return true;
+        if (currentUrl.includes(targetPath)) {
+            createFloatingButtons();
+            console.log('商品管理助手已启用 - 检测到目标页面');
+            return true;
+        }
+
+        console.log('商品管理助手未启用 - 非目标页面');
+        return false;
     }
 
-    console.log('商品管理助手未启用 - 非目标页面');
-    return false;
-}
-
-// 创建悬浮按钮组
-function createFloatingButtons() {
-    // 创建主容器
-    const buttonContainer = document.createElement('div');
-    buttonContainer.id = 'inventory-assistant-panel';
-    buttonContainer.style.cssText = `
+    // 创建悬浮按钮组
+    function createFloatingButtons() {
+        // 创建主容器
+        const buttonContainer = document.createElement('div');
+        buttonContainer.id = 'inventory-assistant-panel';
+        buttonContainer.style.cssText = `
         position: fixed;
         top: 20px;
         left: 50%;
@@ -286,19 +486,20 @@ function createFloatingButtons() {
         transition: all 0.3s ease;
     `;
 
-    // 按钮数据配置
-    const buttonsConfig = [
-        { id: 'locate-prev', text: '定位需调价商品', onClick: handleLocatePrev },
-        { id: 'auto-adjust', text: '自动调价', onClick: handleAutoAdjust },
-        { id: 'locate-next', text: '滚动下一页', onClick: handleLocateNext }
-    ];
+        // 按钮数据配置
+        const buttonsConfig = [
+            { id: 'locate-prev', text: '定位需调价商品', onClick: handleLocatePrev },
+            { id: 'auto-adjust', text: '自动调价', onClick: handleAutoAdjust },
+            { id: 'locate-next', text: '滚动下一页', onClick: handleLocateNext },
+            { id: 'inspection-registration', text: '校验本国注册', onClick: inspectionRegistration }
+        ];
 
-    // 创建按钮
-    buttonsConfig.forEach(config => {
-        const button = document.createElement('button');
-        button.id = config.id;
-        button.textContent = config.text;
-        button.style.cssText = `
+        // 创建按钮
+        buttonsConfig.forEach(config => {
+            const button = document.createElement('button');
+            button.id = config.id;
+            button.textContent = config.text;
+            button.style.cssText = `
             background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
             color: white;
             border: none;
@@ -313,63 +514,69 @@ function createFloatingButtons() {
             min-width: 80px;
         `;
 
-        // 悬停效果
-        button.addEventListener('mouseenter', () => {
-            button.style.transform = 'translateY(-2px)';
-            button.style.boxShadow = '0 4px 12px rgba(0, 123, 255, 0.4)';
+            // 悬停效果
+            button.addEventListener('mouseenter', () => {
+                button.style.transform = 'translateY(-2px)';
+                button.style.boxShadow = '0 4px 12px rgba(0, 123, 255, 0.4)';
+            });
+
+            button.addEventListener('mouseleave', () => {
+                button.style.transform = 'translateY(0)';
+                button.style.boxShadow = '0 2px 8px rgba(0, 123, 255, 0.3)';
+            });
+
+            // 绑定点击事件
+            button.addEventListener('click', config.onClick);
+
+            buttonContainer.appendChild(button);
+
         });
+        // 添加到页面
+        document.body.appendChild(buttonContainer);
 
-        button.addEventListener('mouseleave', () => {
-            button.style.transform = 'translateY(0)';
-            button.style.boxShadow = '0 2px 8px rgba(0, 123, 255, 0.3)';
+        // 添加滚动监听，保持按钮始终可见
+        window.addEventListener('scroll', () => {
+            buttonContainer.style.top = '20px';
         });
+    }
 
-        // 绑定点击事件
-        button.addEventListener('click', config.onClick);
+    // 按钮点击事件处理函数
+    function handleLocatePrev() {
+        console.log('定位上一个功能已触发');
+        cycleScrollToRedCross();
+    }
 
-        buttonContainer.appendChild(button);
+    function handleAutoAdjust() {
+        console.log('自动调价功能已触发');
+        // 预留：添加自动调价逻辑
+        autoAdjustPrice();
+    }
 
-    });
-    // 添加到页面
-    document.body.appendChild(buttonContainer);
+    function handleLocateNext() {
+        console.log('定位下一个功能已触发');
+        scrollToBottom();
+    }
 
-    // 添加滚动监听，保持按钮始终可见
-    window.addEventListener('scroll', () => {
-        buttonContainer.style.top = '20px';
-    });
-}
 
-// 按钮点击事件处理函数
-function handleLocatePrev() {
-    console.log('定位上一个功能已触发');
-    cycleScrollToRedCross();
-}
+    function inspectionRegistration() {
+        console.log('校验是否注册已触发');
+        init();
+    }
 
-function handleAutoAdjust() {
-    console.log('自动调价功能已触发');
-    // 预留：添加自动调价逻辑
-    autoAdjustPrice();
-}
+    // 页面加载完成后初始化
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initInventoryAssistant);
+    } else {
+        initInventoryAssistant();
+    }
 
-function handleLocateNext() {
-    console.log('定位下一个功能已触发');
-   scrollToBottom();
-}
-
-// 页面加载完成后初始化
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initInventoryAssistant);
-} else {
-    initInventoryAssistant();
-}
-
-// 导出函数供外部调用
-window.InventoryAssistant = {
-    init: initInventoryAssistant,
-    createButtons: createFloatingButtons,
-    locatePrev: handleLocatePrev,
-    autoAdjust: handleAutoAdjust,
-    locateNext: handleLocateNext
-};
+    // 导出函数供外部调用
+    window.InventoryAssistant = {
+        init: initInventoryAssistant,
+        createButtons: createFloatingButtons,
+        locatePrev: handleLocatePrev,
+        autoAdjust: handleAutoAdjust,
+        locateNext: handleLocateNext
+    };
 })();
 
