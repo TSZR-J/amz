@@ -195,7 +195,7 @@
                 let data = JSON.parse(response.responseText);
                 if(data.code === 401)
                 {
-                    addAsinLabel("null","https://amazon.zying.net/#/bigData",skuMap[asin[0]], asin[0],'智赢插件登录失效，请点击跳转重新登录',0);
+                    addAsinLabel("null","https://amazon.zying.net/#/bigData",skuMap.get(asin[0]), asin[0],'智赢插件登录失效，请点击跳转重新登录',4);
                     return;
                 }
                 if(data.data.list.length>0)
