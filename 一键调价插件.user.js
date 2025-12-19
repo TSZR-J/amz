@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         一键调价插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.5
+// @version      1.0.6
 // @description  获取当前需调价的商品
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/一键调价插件.user.js
@@ -418,7 +418,7 @@
 
             // 判断当前价格是否大于推荐报价
             if (currentPrice > referenceTotal) {
-                let newPrice = (referenceTotal - 0.02)/0.95;
+                let newPrice = (referenceTotal - 0.06)/0.95;
 
                 // 检查新价格是否低于最低价格（仅当最低价格不为空时）
                 if (minPrice !== null && newPrice < minPrice) {
