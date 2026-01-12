@@ -403,9 +403,8 @@
                 const data = JSON.parse(response.responseText);
                 // Token无效处理
                 if (data.code === 401) {
-                    alert(`查询${site.name}失败：Token无效或已过期`);
                     // 该站点所有ASIN标记为请求失败
-                    asins.forEach(asin => updateAsinSales(asin, site.code, '请求失败'));
+                    asins.forEach(asin => updateAsinSales(asin, site.code, '智赢选品登录失效，请重新登录'));
                     return;
                 }
 
