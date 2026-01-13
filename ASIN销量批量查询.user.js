@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ASIN销量查询（弹窗版）
 // @namespace    http://tampermonkey.net/
-// @version      1.7
-// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN单元格支持点击复制，规格列调整至第二列+表格滚动条
+// @version      1.8
+// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN单元格支持点击复制，规格列=color-size+表格滚动条
 // @author       You
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
@@ -17,7 +17,7 @@
 (function() {
     'use strict';
 
-    // ========== 1. 注入全局样式（弹窗、表格、按钮、复制提示等） ==========
+    // ========== 1. 注入全局样式 ==========
     GM_addStyle(`
         /* 底部触发按钮 */
         #asinQueryBtn {
@@ -129,7 +129,7 @@
             background: #005a9e;
         }
 
-        /* 表格容器 - 核心：固定表头+tbody滚动 */
+        /* 表格容器 - 固定表头+tbody滚动 */
         .table-container {
             width: 100%;
             background: #fff;
@@ -221,16 +221,16 @@
         }
     `);
 
-    // ========== 2. 核心配置（关键修改：列索引调整） ==========
-    // 亚马逊站点配置 - 索引全部+1（因为规格列插入到第二列）
+    // ========== 2. 核心配置 ==========
+    // 亚马逊站点配置（索引已适配规格列在第二列）
     const amazonSites = [
-        { name: "英国", code: "GB", colIndex: 2 }, // 原1→现2
-        { name: "法国", code: "FR", colIndex: 3 }, // 原2→现3
-        { name: "德国", code: "DE", colIndex: 4 }, // 原3→现4
-        { name: "意大利", code: "IT", colIndex: 5 }, // 原4→现5
-        { name: "西班牙", code: "ES", colIndex: 6 }  // 原5→现6
+        { name: "英国", code: "GB", colIndex: 2 },
+        { name: "法国", code: "FR", colIndex: 3 },
+        { name: "德国", code: "DE", colIndex: 4 },
+        { name: "意大利", code: "IT", colIndex: 5 },
+        { name: "西班牙", code: "ES", colIndex: 6 }
     ];
-    // 规格列索引 - 改为1（第二列）
+    // 规格列索引（第二列）
     const SIZE_COL_INDEX = 1;
     // API接口地址
     const API_URL = 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list';
@@ -305,7 +305,30 @@
     }
 
     /**
-     * 清空表格并初始化ASIN行（调整列顺序：ASIN→规格→5个国家）
+     * 拼接color和size（核心修改：处理空值）
+     * @param {string} color - 颜色值（item.color）
+     * @param {string} size - 尺寸值（item.size）
+     * @returns {string} 拼接后的规格字符串
+     */
+    function getCombinedSpec(color, size) {
+        // 去除首尾空格，统一空值判断
+        const cleanColor = (color || '').trim();
+        const cleanSize = (size || '').trim();
+
+        // 空值处理逻辑
+        if (!cleanColor && !cleanSize) {
+            return '无数据'; // 两者都空
+        } else if (!cleanColor) {
+            return cleanSize; // 只有size有值
+        } else if (!cleanSize) {
+            return cleanColor; // 只有color有值
+        } else {
+            return `${cleanColor}-${cleanSize}`; // 两者都有值，拼接
+        }
+    }
+
+    /**
+     * 清空表格并初始化ASIN行（ASIN→规格→5个国家）
      * @param {array} asins - ASIN数组
      */
     function initAsinTable(asins) {
@@ -325,7 +348,7 @@
             return;
         }
 
-        // 遍历ASIN创建行：ASIN → 规格 → 英国 → 法国 → 德国 → 意大利 → 西班牙
+        // 遍历ASIN创建行
         asins.forEach(asin => {
             const row = document.createElement('tr');
 
@@ -340,7 +363,7 @@
             });
             row.appendChild(asinCell);
 
-            // 2. 规格列（第1列，新增位置）- 默认无数据
+            // 2. 规格列（第1列）- 默认无数据
             const sizeCell = document.createElement('td');
             sizeCell.textContent = '无数据';
             row.appendChild(sizeCell);
@@ -378,15 +401,15 @@
     }
 
     /**
-     * 更新指定ASIN的规格信息
+     * 更新指定ASIN的规格信息（核心修改：接收拼接后的规格）
      * @param {string} asin - ASIN码
-     * @param {string} size - 规格（item.size）
+     * @param {string} spec - 拼接后的规格字符串
      */
-    function updateAsinSize(asin, size) {
+    function updateAsinSize(asin, spec) {
         if (!asinRowMap.has(asin)) return;
         const row = asinRowMap.get(asin);
         const sizeCell = row.cells[SIZE_COL_INDEX];
-        sizeCell.textContent = size || '无数据';
+        sizeCell.textContent = spec || '无数据';
     }
 
     // ========== 4. 核心查询逻辑 ==========
@@ -434,12 +457,14 @@
                     return;
                 }
 
-                // 遍历更新销量+规格
+                // 遍历更新销量+规格（核心修改：调用拼接函数）
                 data.data.list.forEach(item => {
                     updateAsinSales(item.asin, site.code, item.sales);
                     // 仅英国站点请求时更新规格，避免重复
                     if (site.code === 'GB') {
-                        updateAsinSize(item.asin, item.size);
+                        // 拼接color和size，处理空值
+                        const combinedSpec = getCombinedSpec(item.color, item.size);
+                        updateAsinSize(item.asin, combinedSpec);
                     }
                 });
             },
@@ -471,7 +496,7 @@
         });
     }
 
-    // ========== 5. 渲染DOM（调整表头顺序） ==========
+    // ========== 5. 渲染DOM ==========
     function renderDOM() {
         // 创建底部触发按钮
         const bottomBtn = document.createElement('button');
@@ -484,7 +509,7 @@
         modalMask.id = 'asinQueryModalMask';
         document.body.appendChild(modalMask);
 
-        // 创建弹窗主体（调整表头顺序：ASIN→规格→英国→法国→德国→意大利→西班牙）
+        // 创建弹窗主体
         const modal = document.createElement('div');
         modal.id = 'asinQueryModal';
         modal.innerHTML = `
@@ -507,7 +532,7 @@ B09XXXXXXX"></textarea>
                         <thead>
                             <tr>
                                 <th>ASIN</th>
-                                <th>规格</th> <!-- 规格列移到第二列 -->
+                                <th>规格</th>
                                 <th>英国</th>
                                 <th>法国</th>
                                 <th>德国</th>
