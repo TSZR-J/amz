@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ASIN销量查询（弹窗版）
 // @namespace    http://tampermonkey.net/
-// @version      1.5
-// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN单元格支持点击复制
+// @version      1.7
+// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN单元格支持点击复制，规格列调整至第二列+表格滚动条
 // @author       You
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
@@ -129,18 +129,25 @@
             background: #005a9e;
         }
 
-        /* 表格容器 */
+        /* 表格容器 - 核心：固定表头+tbody滚动 */
         .table-container {
             width: 100%;
-            overflow-x: auto;
             background: #fff;
             border-radius: 4px;
             border: 1px solid #ddd;
+            max-height: 400px;
+            overflow: hidden;
         }
         #resultTable {
             width: 100%;
             border-collapse: collapse;
             text-align: center;
+            table-layout: fixed;
+        }
+        #resultTable thead {
+            position: sticky;
+            top: 0;
+            z-index: 10;
         }
         #resultTable th {
             background: #0078d7;
@@ -149,12 +156,27 @@
             font-weight: bold;
             font-size: 14px;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        #resultTable tbody {
+            display: block;
+            width: 100%;
+            max-height: 350px;
+            overflow-y: auto;
+        }
+        #resultTable thead tr, #resultTable tbody tr {
+            display: table;
+            width: 100%;
+            table-layout: fixed;
         }
         #resultTable td {
             padding: 10px 8px;
             border: 1px solid #ddd;
             font-size: 13px;
             white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
         }
         #resultTable tr:nth-child(even) {
             background: #f9f9f9;
@@ -169,48 +191,50 @@
             font-size: 14px;
         }
 
-        /* ========== 新增：ASIN单元格复制样式 ========== */
+        /* ASIN单元格复制样式 */
         .asin-cell {
-            cursor: pointer; /* 鼠标小手提示可点击 */
-            color: #0078d7; /* 蓝色文字区分可点击 */
-            text-decoration: underline; /* 下划线提示可点击 */
-            user-select: none; /* 防止选中文字干扰 */
+            cursor: pointer;
+            color: #0078d7;
+            text-decoration: underline;
+            user-select: none;
         }
         .asin-cell:hover {
-            color: #005a9e; /* hover加深颜色 */
-            text-decoration: none; /* hover取消下划线 */
+            color: #005a9e;
+            text-decoration: none;
         }
 
-        /* ========== 新增：复制成功提示框样式 ========== */
+        /* 复制成功提示框样式 */
         .copy-toast {
             position: fixed;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            background: rgba(0,0,0,0.7); /* 半透明黑底 */
+            background: rgba(0,0,0,0.7);
             color: white;
             padding: 12px 24px;
             border-radius: 6px;
             font-size: 14px;
-            z-index: 10002; /* 层级高于弹窗 */
+            z-index: 10002;
             display: none;
             opacity: 0;
-            transition: opacity 0.3s ease; /* 渐变显示/隐藏 */
+            transition: opacity 0.3s ease;
         }
     `);
 
-    // ========== 2. 核心配置 ==========
-    // 亚马逊站点配置（code与表头列映射）
+    // ========== 2. 核心配置（关键修改：列索引调整） ==========
+    // 亚马逊站点配置 - 索引全部+1（因为规格列插入到第二列）
     const amazonSites = [
-        { name: "英国", code: "GB", colIndex: 1 }, // 第2列（ASIN是第0列）
-        { name: "法国", code: "FR", colIndex: 2 }, // 第3列
-        { name: "德国", code: "DE", colIndex: 3 }, // 第4列
-        { name: "意大利", code: "IT", colIndex: 4 }, // 第5列
-        { name: "西班牙", code: "ES", colIndex: 5 }  // 第6列
+        { name: "英国", code: "GB", colIndex: 2 }, // 原1→现2
+        { name: "法国", code: "FR", colIndex: 3 }, // 原2→现3
+        { name: "德国", code: "DE", colIndex: 4 }, // 原3→现4
+        { name: "意大利", code: "IT", colIndex: 5 }, // 原4→现5
+        { name: "西班牙", code: "ES", colIndex: 6 }  // 原5→现6
     ];
+    // 规格列索引 - 改为1（第二列）
+    const SIZE_COL_INDEX = 1;
     // API接口地址
     const API_URL = 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list';
-    // 存储ASIN行元素映射（便于后续更新销量）
+    // 存储ASIN行元素映射
     let asinRowMap = new Map();
 
     // ========== 3. 工具函数 ==========
@@ -228,30 +252,25 @@
     }
 
     /**
-     * ========== 新增：复制文本到剪贴板 ==========
+     * 复制文本到剪贴板
      * @param {string} text - 要复制的文本（ASIN码）
      * @returns {boolean} 是否复制成功
      */
     function copyTextToClipboard(text) {
         try {
-            // 现代浏览器优先使用Clipboard API（安全上下文）
             if (navigator.clipboard && window.isSecureContext) {
                 navigator.clipboard.writeText(text);
             } else {
-                // 兼容旧浏览器/非安全上下文（如本地文件）
                 const textArea = document.createElement('textarea');
                 textArea.value = text;
-                // 隐藏textarea防止干扰界面
                 textArea.style.position = 'fixed';
                 textArea.style.top = '0';
                 textArea.style.left = '0';
                 textArea.style.opacity = '0';
                 document.body.appendChild(textArea);
-                // 选中并复制
                 textArea.focus();
                 textArea.select();
                 document.execCommand('copy');
-                // 移除临时元素
                 document.body.removeChild(textArea);
             }
             return true;
@@ -263,23 +282,20 @@
     }
 
     /**
-     * ========== 新增：显示复制成功提示框 ==========
+     * 显示复制成功提示框
      * @param {string} asin - 复制的ASIN码
      */
     function showCopyToast(asin) {
         let toast = document.getElementById('copyToast');
-        // 不存在则创建提示框
         if (!toast) {
             toast = document.createElement('div');
             toast.id = 'copyToast';
             toast.className = 'copy-toast';
             document.body.appendChild(toast);
         }
-        // 设置提示文本并显示
         toast.textContent = `【${asin}】复制成功`;
         toast.style.display = 'block';
         toast.style.opacity = '1';
-        // 2秒后渐变隐藏
         setTimeout(() => {
             toast.style.opacity = '0';
             setTimeout(() => {
@@ -289,19 +305,19 @@
     }
 
     /**
-     * 清空表格并初始化ASIN行（提前填充ASIN，各国列默认无数据）
+     * 清空表格并初始化ASIN行（调整列顺序：ASIN→规格→5个国家）
      * @param {array} asins - ASIN数组
      */
     function initAsinTable(asins) {
         const tableBody = document.getElementById('tableBody');
-        tableBody.innerHTML = ''; // 清空表格
-        asinRowMap.clear(); // 清空行映射
+        tableBody.innerHTML = '';
+        asinRowMap.clear();
 
         // 无ASIN时显示提示
         if (asins.length === 0) {
             const tipRow = document.createElement('tr');
             const tipCell = document.createElement('td');
-            tipCell.colSpan = 6; // 6列表头
+            tipCell.colSpan = 7;
             tipCell.className = 'tip-text';
             tipCell.textContent = "暂无ASIN数据";
             tipRow.appendChild(tipCell);
@@ -309,23 +325,27 @@
             return;
         }
 
-        // 遍历ASIN，创建每行数据（默认各国列显示无数据）
+        // 遍历ASIN创建行：ASIN → 规格 → 英国 → 法国 → 德国 → 意大利 → 西班牙
         asins.forEach(asin => {
             const row = document.createElement('tr');
 
-            // 1. ASIN列（第0列）- 新增点击复制功能
+            // 1. ASIN列（第0列）- 点击复制
             const asinCell = document.createElement('td');
             asinCell.textContent = asin;
-            asinCell.className = 'asin-cell'; // 添加可点击样式类
-            // 绑定点击复制事件
+            asinCell.className = 'asin-cell';
             asinCell.addEventListener('click', () => {
                 if (copyTextToClipboard(asin)) {
-                    showCopyToast(asin); // 复制成功显示提示
+                    showCopyToast(asin);
                 }
             });
             row.appendChild(asinCell);
 
-            // 2-6列：英国、法国、德国、意大利、西班牙（默认无数据）
+            // 2. 规格列（第1列，新增位置）- 默认无数据
+            const sizeCell = document.createElement('td');
+            sizeCell.textContent = '无数据';
+            row.appendChild(sizeCell);
+
+            // 3-7列：英国、法国、德国、意大利、西班牙（默认无数据）
             for (let i = 0; i < 5; i++) {
                 const countryCell = document.createElement('td');
                 countryCell.textContent = '无数据';
@@ -334,7 +354,6 @@
 
             // 添加行到表格
             tableBody.appendChild(row);
-            // 存储行元素（便于后续更新销量）
             asinRowMap.set(asin, row);
         });
     }
@@ -348,45 +367,50 @@
     function updateAsinSales(asin, code, sales) {
         if (!asinRowMap.has(asin)) return;
         const row = asinRowMap.get(asin);
-        // 找到对应国家的列索引
         const site = amazonSites.find(item => item.code === code);
         if (!site) return;
 
-        // 更新对应列的销量（无数据则保持，请求失败显示提示）
         const cell = row.cells[site.colIndex];
         cell.textContent = sales || '无数据';
         if (sales === '请求失败') {
-            cell.style.color = '#ff4444'; // 失败提示标红
+            cell.style.color = '#ff4444';
         }
     }
 
-    // ========== 4. 核心查询逻辑（适配油猴GM.xmlHttpRequest） ==========
     /**
-     * 发送ASIN查询请求（油猴跨域版）
+     * 更新指定ASIN的规格信息
+     * @param {string} asin - ASIN码
+     * @param {string} size - 规格（item.size）
+     */
+    function updateAsinSize(asin, size) {
+        if (!asinRowMap.has(asin)) return;
+        const row = asinRowMap.get(asin);
+        const sizeCell = row.cells[SIZE_COL_INDEX];
+        sizeCell.textContent = size || '无数据';
+    }
+
+    // ========== 4. 核心查询逻辑 ==========
+    /**
+     * 发送ASIN查询请求
      * @param {object} site - 站点信息
      * @param {array} asins - ASIN数组
      * @param {string} token - 智赢Token
      */
     function sendAsinRequest(site, asins, token) {
-        // 生成时间戳
         const timestamp = Math.round(new Date().getTime() / 1000).toString();
-        // 构造请求数据
         const requestData = JSON.stringify({
             abbr: site.code,
             pagesize: 100,
             keys: asins
         });
-        // 验签相关配置
         const version = "v1";
         const postUrl = "https://amazon.zying.net";
         const method = "POST";
         const apiPath = "/api/CmdHandler?cmd=zscout_asin.list";
 
-        // 生成签名
         const signStr = requestData + method + apiPath + timestamp + token + version;
         const signature = CryptoJS.HmacSHA256(signStr, postUrl).toString(CryptoJS.enc.Hex);
 
-        // 油猴跨域请求（替代fetch）
         GM.xmlHttpRequest({
             method: 'POST',
             url: API_URL,
@@ -401,26 +425,25 @@
             data: requestData,
             onload: function(response) {
                 const data = JSON.parse(response.responseText);
-                // Token无效处理
                 if (data.code === 401) {
-                    // 该站点所有ASIN标记为请求失败
                     asins.forEach(asin => updateAsinSales(asin, site.code, '智赢选品登录失效，请重新登录'));
                     return;
                 }
 
-                // 无数据处理
                 if (!data.data || !data.data.list || data.data.list.length === 0) {
-                    // 该站点所有ASIN保持无数据（无需修改）
                     return;
                 }
 
-                // 遍历更新对应ASIN的对应国家销量（取item.sales）
+                // 遍历更新销量+规格
                 data.data.list.forEach(item => {
                     updateAsinSales(item.asin, site.code, item.sales);
+                    // 仅英国站点请求时更新规格，避免重复
+                    if (site.code === 'GB') {
+                        updateAsinSize(item.asin, item.size);
+                    }
                 });
             },
             onerror: function(error) {
-                // 请求失败，该站点所有ASIN标记为请求失败
                 asins.forEach(asin => updateAsinSales(asin, site.code, '请求失败'));
                 console.error(`查询${site.name}失败：`, error);
             }
@@ -431,50 +454,43 @@
      * 初始化查询流程
      */
     function initQuery() {
-        // 从油猴本地存储获取Token
         const token = GM_getValue("token", "");
-        // 获取并验证ASIN
         const asinInput = document.getElementById('modalAsinInput');
         const asinText = asinInput.value.trim();
         if (!asinText) {
             alert("请输入需要查询的ASIN码（一行一个）！");
             return;
         }
-        // 解析ASIN（去空行、去空格）
         const asins = asinText.split('\n')
                              .map(line => line.trim())
                              .filter(line => line.length > 0);
 
-        // 第一步：提前填充ASIN到表格（各国列默认无数据）
         initAsinTable(asins);
-
-        // 第二步：遍历所有站点发送请求，更新对应国家销量
         amazonSites.forEach(site => {
             sendAsinRequest(site, asins, token);
         });
     }
 
-    // ========== 5. 渲染DOM（底部按钮+弹窗） ==========
+    // ========== 5. 渲染DOM（调整表头顺序） ==========
     function renderDOM() {
-        // 1. 创建底部触发按钮
+        // 创建底部触发按钮
         const bottomBtn = document.createElement('button');
         bottomBtn.id = 'asinQueryBtn';
         bottomBtn.textContent = 'ASIN销量查询';
         document.body.appendChild(bottomBtn);
 
-        // 2. 创建弹窗遮罩
+        // 创建弹窗遮罩
         const modalMask = document.createElement('div');
         modalMask.id = 'asinQueryModalMask';
         document.body.appendChild(modalMask);
 
-        // 3. 创建弹窗主体（6列表头）
+        // 创建弹窗主体（调整表头顺序：ASIN→规格→英国→法国→德国→意大利→西班牙）
         const modal = document.createElement('div');
         modal.id = 'asinQueryModal';
         modal.innerHTML = `
             <div id="modalCloseBtn">×</div>
             <h3 style="margin-bottom:20px;color:#333;font-size:18px;text-align:center;">ASIN销量查询工具</h3>
 
-            <!-- ASIN富文本输入框 -->
             <div class="modal-form-group">
                 <label for="modalAsinInput">ASIN输入（一行一个）：</label>
                 <textarea id="modalAsinInput" placeholder="例如：
@@ -482,10 +498,8 @@ B08XXXXXXX
 B09XXXXXXX"></textarea>
             </div>
 
-            <!-- 弹窗内查询按钮 -->
             <button id="modalQueryBtn">开始查询</button>
 
-            <!-- 结果表格（6列表头） -->
             <div class="modal-form-group">
                 <label>查询结果：</label>
                 <div class="table-container">
@@ -493,6 +507,7 @@ B09XXXXXXX"></textarea>
                         <thead>
                             <tr>
                                 <th>ASIN</th>
+                                <th>规格</th> <!-- 规格列移到第二列 -->
                                 <th>英国</th>
                                 <th>法国</th>
                                 <th>德国</th>
@@ -502,7 +517,7 @@ B09XXXXXXX"></textarea>
                         </thead>
                         <tbody id="tableBody">
                             <tr>
-                                <td colspan="6" class="tip-text">输入ASIN后点击查询，结果将显示在这里...</td>
+                                <td colspan="7" class="tip-text">输入ASIN后点击查询，结果将显示在这里...</td>
                             </tr>
                         </tbody>
                     </table>
@@ -511,28 +526,26 @@ B09XXXXXXX"></textarea>
         `;
         document.body.appendChild(modal);
 
-        // ========== 6. 绑定事件 ==========
-        // 底部按钮点击 → 显示弹窗
+        // 绑定事件
         bottomBtn.addEventListener('click', () => {
             modalMask.style.display = 'block';
             modal.style.display = 'block';
         });
 
-        // 关闭按钮/遮罩点击 → 隐藏弹窗
         modalMask.addEventListener('click', () => {
             modalMask.style.display = 'none';
             modal.style.display = 'none';
         });
+
         document.getElementById('modalCloseBtn').addEventListener('click', () => {
             modalMask.style.display = 'none';
             modal.style.display = 'none';
         });
 
-        // 弹窗内查询按钮点击 → 执行查询
         document.getElementById('modalQueryBtn').addEventListener('click', initQuery);
     }
 
-    // ========== 7. 页面加载完成后渲染 ==========
+    // 页面加载完成后渲染
     if (document.readyState === 'complete') {
         renderDOM();
     } else {
