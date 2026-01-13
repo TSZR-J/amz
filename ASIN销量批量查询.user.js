@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ASIN销量查询（弹窗版）
 // @namespace    http://tampermonkey.net/
-// @version      1.9
-// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN单元格支持点击复制，规格列=color-size+悬停显示完整文本+表格滚动条
+// @version      2.0
+// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN单元格支持点击复制，规格列=color-size+悬停显示完整文本+清空按钮+表格滚动条
 // @author       You
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
@@ -113,6 +113,13 @@
             line-height: 1.5;
         }
 
+        /* 按钮容器（查询+清空） */
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+
         /* 查询按钮 */
         #modalQueryBtn {
             padding: 10px 25px;
@@ -123,10 +130,26 @@
             font-size: 14px;
             cursor: pointer;
             transition: background 0.3s;
-            margin-bottom: 20px;
+            flex: none;
         }
         #modalQueryBtn:hover {
             background: #005a9e;
+        }
+
+        /* 清空按钮（新增） */
+        #modalClearBtn {
+            padding: 10px 25px;
+            background: #f56c6c;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.3s;
+            flex: none;
+        }
+        #modalClearBtn:hover {
+            background: #e64949;
         }
 
         /* 表格容器 - 固定表头+tbody滚动 */
@@ -177,7 +200,6 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
-            /* 新增：鼠标移上去显示小手，提示有悬浮提示 */
             cursor: help;
         }
         #resultTable tr:nth-child(even) {
@@ -195,7 +217,7 @@
 
         /* ASIN单元格复制样式 */
         .asin-cell {
-            cursor: pointer !important; /* 覆盖td的cursor:help */
+            cursor: pointer !important;
             color: #0078d7;
             text-decoration: underline;
             user-select: none;
@@ -224,7 +246,6 @@
     `);
 
     // ========== 2. 核心配置 ==========
-    // 亚马逊站点配置（索引已适配规格列在第二列）
     const amazonSites = [
         { name: "英国", code: "GB", colIndex: 2 },
         { name: "法国", code: "FR", colIndex: 3 },
@@ -232,18 +253,13 @@
         { name: "意大利", code: "IT", colIndex: 5 },
         { name: "西班牙", code: "ES", colIndex: 6 }
     ];
-    // 规格列索引（第二列）
     const SIZE_COL_INDEX = 1;
-    // API接口地址
     const API_URL = 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list';
-    // 存储ASIN行元素映射
     let asinRowMap = new Map();
 
     // ========== 3. 工具函数 ==========
     /**
      * 移除字符串首尾的引号
-     * @param {string} str - 待处理字符串
-     * @returns {string} 处理后的字符串
      */
     function removeQuotes(str) {
         if (typeof str !== 'string') return str;
@@ -255,8 +271,6 @@
 
     /**
      * 复制文本到剪贴板
-     * @param {string} text - 要复制的文本（ASIN码）
-     * @returns {boolean} 是否复制成功
      */
     function copyTextToClipboard(text) {
         try {
@@ -285,7 +299,6 @@
 
     /**
      * 显示复制成功提示框
-     * @param {string} asin - 复制的ASIN码
      */
     function showCopyToast(asin) {
         let toast = document.getElementById('copyToast');
@@ -308,57 +321,51 @@
 
     /**
      * 拼接color和size（处理空值）
-     * @param {string} color - 颜色值（item.color）
-     * @param {string} size - 尺寸值（item.size）
-     * @returns {string} 拼接后的规格字符串
      */
     function getCombinedSpec(color, size) {
-        // 去除首尾空格，统一空值判断
         const cleanColor = (color || '').trim();
         const cleanSize = (size || '').trim();
 
-        // 空值处理逻辑
         if (!cleanColor && !cleanSize) {
-            return '无数据'; // 两者都空
+            return '无数据';
         } else if (!cleanColor) {
-            return cleanSize; // 只有size有值
+            return cleanSize;
         } else if (!cleanSize) {
-            return cleanColor; // 只有color有值
+            return cleanColor;
         } else {
-            return `${cleanColor}-${cleanSize}`; // 两者都有值，拼接
+            return `${cleanColor}-${cleanSize}`;
         }
     }
 
     /**
-     * 清空表格并初始化ASIN行（ASIN→规格→5个国家）
-     * @param {array} asins - ASIN数组
+     * 初始化ASIN表格（空状态/初始提示）
      */
-    function initAsinTable(asins) {
+    function initAsinTable(asins = []) {
         const tableBody = document.getElementById('tableBody');
         tableBody.innerHTML = '';
         asinRowMap.clear();
 
-        // 无ASIN时显示提示
+        // 无ASIN时显示初始提示
         if (asins.length === 0) {
             const tipRow = document.createElement('tr');
             const tipCell = document.createElement('td');
             tipCell.colSpan = 7;
             tipCell.className = 'tip-text';
-            tipCell.textContent = "暂无ASIN数据";
+            tipCell.textContent = "输入ASIN后点击查询，结果将显示在这里...";
             tipRow.appendChild(tipCell);
             tableBody.appendChild(tipRow);
             return;
         }
 
-        // 遍历ASIN创建行
+        // 有ASIN时初始化行
         asins.forEach(asin => {
             const row = document.createElement('tr');
 
-            // 1. ASIN列（第0列）- 点击复制
+            // ASIN列
             const asinCell = document.createElement('td');
             asinCell.textContent = asin;
             asinCell.className = 'asin-cell';
-            asinCell.title = asin; // 新增：ASIN列也加悬浮提示（可选）
+            asinCell.title = asin;
             asinCell.addEventListener('click', () => {
                 if (copyTextToClipboard(asin)) {
                     showCopyToast(asin);
@@ -366,31 +373,42 @@
             });
             row.appendChild(asinCell);
 
-            // 2. 规格列（第1列）- 默认无数据，新增title属性
+            // 规格列
             const sizeCell = document.createElement('td');
             sizeCell.textContent = '无数据';
-            sizeCell.title = '无数据'; // 核心：初始化时设置title
+            sizeCell.title = '无数据';
             row.appendChild(sizeCell);
 
-            // 3-7列：英国、法国、德国、意大利、西班牙（默认无数据）
+            // 各国销量列
             for (let i = 0; i < 5; i++) {
                 const countryCell = document.createElement('td');
                 countryCell.textContent = '无数据';
-                countryCell.title = '无数据'; // 可选：销量列也加悬浮提示
+                countryCell.title = '无数据';
                 row.appendChild(countryCell);
             }
 
-            // 添加行到表格
             tableBody.appendChild(row);
             asinRowMap.set(asin, row);
         });
     }
 
     /**
+     * 清空所有内容（新增核心函数）
+     */
+    function clearAllContent() {
+        // 1. 清空ASIN输入框
+        const asinInput = document.getElementById('modalAsinInput');
+        asinInput.value = '';
+
+        // 2. 重置表格到初始状态
+        initAsinTable();
+
+        // 3. 可选：聚焦输入框，提升体验
+        asinInput.focus();
+    }
+
+    /**
      * 更新指定ASIN的指定国家销量
-     * @param {string} asin - ASIN码
-     * @param {string} code - 站点code（GB/FR/DE/IT/ES）
-     * @param {string|number} sales - 销量（item.sales）
      */
     function updateAsinSales(asin, code, sales) {
         if (!asinRowMap.has(asin)) return;
@@ -401,34 +419,25 @@
         const cell = row.cells[site.colIndex];
         const displayText = sales || '无数据';
         cell.textContent = displayText;
-        cell.title = displayText; // 新增：销量列悬浮显示完整文本
+        cell.title = displayText;
         if (sales === '请求失败') {
             cell.style.color = '#ff4444';
         }
     }
 
     /**
-     * 更新指定ASIN的规格信息（核心：设置title属性显示完整文本）
-     * @param {string} asin - ASIN码
-     * @param {string} spec - 拼接后的规格字符串
+     * 更新指定ASIN的规格信息
      */
     function updateAsinSize(asin, spec) {
         if (!asinRowMap.has(asin)) return;
         const row = asinRowMap.get(asin);
         const sizeCell = row.cells[SIZE_COL_INDEX];
         const displayText = spec || '无数据';
-        // 核心修改：同时设置显示文本和title（title显示完整内容）
         sizeCell.textContent = displayText;
         sizeCell.title = displayText;
     }
 
     // ========== 4. 核心查询逻辑 ==========
-    /**
-     * 发送ASIN查询请求
-     * @param {object} site - 站点信息
-     * @param {array} asins - ASIN数组
-     * @param {string} token - 智赢Token
-     */
     function sendAsinRequest(site, asins, token) {
         const timestamp = Math.round(new Date().getTime() / 1000).toString();
         const requestData = JSON.stringify({
@@ -467,12 +476,9 @@
                     return;
                 }
 
-                // 遍历更新销量+规格
                 data.data.list.forEach(item => {
                     updateAsinSales(item.asin, site.code, item.sales);
-                    // 仅英国站点请求时更新规格，避免重复
                     if (site.code === 'GB') {
-                        // 拼接color和size，处理空值
                         const combinedSpec = getCombinedSpec(item.color, item.size);
                         updateAsinSize(item.asin, combinedSpec);
                     }
@@ -485,9 +491,6 @@
         });
     }
 
-    /**
-     * 初始化查询流程
-     */
     function initQuery() {
         const token = GM_getValue("token", "");
         const asinInput = document.getElementById('modalAsinInput');
@@ -508,18 +511,18 @@
 
     // ========== 5. 渲染DOM ==========
     function renderDOM() {
-        // 创建底部触发按钮
+        // 底部触发按钮
         const bottomBtn = document.createElement('button');
         bottomBtn.id = 'asinQueryBtn';
         bottomBtn.textContent = 'ASIN销量查询';
         document.body.appendChild(bottomBtn);
 
-        // 创建弹窗遮罩
+        // 弹窗遮罩
         const modalMask = document.createElement('div');
         modalMask.id = 'asinQueryModalMask';
         document.body.appendChild(modalMask);
 
-        // 创建弹窗主体
+        // 弹窗主体（新增清空按钮）
         const modal = document.createElement('div');
         modal.id = 'asinQueryModal';
         modal.innerHTML = `
@@ -533,7 +536,11 @@ B08XXXXXXX
 B09XXXXXXX"></textarea>
             </div>
 
-            <button id="modalQueryBtn">开始查询</button>
+            <!-- 新增：按钮容器（查询+清空） -->
+            <div class="btn-group">
+                <button id="modalQueryBtn">开始查询</button>
+                <button id="modalClearBtn">清空内容</button>
+            </div>
 
             <div class="modal-form-group">
                 <label>查询结果：</label>
@@ -562,22 +569,27 @@ B09XXXXXXX"></textarea>
         document.body.appendChild(modal);
 
         // 绑定事件
+        // 底部按钮打开弹窗
         bottomBtn.addEventListener('click', () => {
             modalMask.style.display = 'block';
             modal.style.display = 'block';
         });
 
+        // 关闭弹窗
         modalMask.addEventListener('click', () => {
             modalMask.style.display = 'none';
             modal.style.display = 'none';
         });
-
         document.getElementById('modalCloseBtn').addEventListener('click', () => {
             modalMask.style.display = 'none';
             modal.style.display = 'none';
         });
 
+        // 查询按钮
         document.getElementById('modalQueryBtn').addEventListener('click', initQuery);
+
+        // 清空按钮（新增）
+        document.getElementById('modalClearBtn').addEventListener('click', clearAllContent);
     }
 
     // 页面加载完成后渲染
