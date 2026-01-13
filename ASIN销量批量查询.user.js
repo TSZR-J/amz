@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ASIN销量查询（弹窗版）
 // @namespace    http://tampermonkey.net/
-// @version      1.8
-// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN单元格支持点击复制，规格列=color-size+表格滚动条
+// @version      1.9
+// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN单元格支持点击复制，规格列=color-size+悬停显示完整文本+表格滚动条
 // @author       You
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
@@ -177,6 +177,8 @@
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
+            /* 新增：鼠标移上去显示小手，提示有悬浮提示 */
+            cursor: help;
         }
         #resultTable tr:nth-child(even) {
             background: #f9f9f9;
@@ -193,7 +195,7 @@
 
         /* ASIN单元格复制样式 */
         .asin-cell {
-            cursor: pointer;
+            cursor: pointer !important; /* 覆盖td的cursor:help */
             color: #0078d7;
             text-decoration: underline;
             user-select: none;
@@ -305,7 +307,7 @@
     }
 
     /**
-     * 拼接color和size（核心修改：处理空值）
+     * 拼接color和size（处理空值）
      * @param {string} color - 颜色值（item.color）
      * @param {string} size - 尺寸值（item.size）
      * @returns {string} 拼接后的规格字符串
@@ -356,6 +358,7 @@
             const asinCell = document.createElement('td');
             asinCell.textContent = asin;
             asinCell.className = 'asin-cell';
+            asinCell.title = asin; // 新增：ASIN列也加悬浮提示（可选）
             asinCell.addEventListener('click', () => {
                 if (copyTextToClipboard(asin)) {
                     showCopyToast(asin);
@@ -363,15 +366,17 @@
             });
             row.appendChild(asinCell);
 
-            // 2. 规格列（第1列）- 默认无数据
+            // 2. 规格列（第1列）- 默认无数据，新增title属性
             const sizeCell = document.createElement('td');
             sizeCell.textContent = '无数据';
+            sizeCell.title = '无数据'; // 核心：初始化时设置title
             row.appendChild(sizeCell);
 
             // 3-7列：英国、法国、德国、意大利、西班牙（默认无数据）
             for (let i = 0; i < 5; i++) {
                 const countryCell = document.createElement('td');
                 countryCell.textContent = '无数据';
+                countryCell.title = '无数据'; // 可选：销量列也加悬浮提示
                 row.appendChild(countryCell);
             }
 
@@ -394,14 +399,16 @@
         if (!site) return;
 
         const cell = row.cells[site.colIndex];
-        cell.textContent = sales || '无数据';
+        const displayText = sales || '无数据';
+        cell.textContent = displayText;
+        cell.title = displayText; // 新增：销量列悬浮显示完整文本
         if (sales === '请求失败') {
             cell.style.color = '#ff4444';
         }
     }
 
     /**
-     * 更新指定ASIN的规格信息（核心修改：接收拼接后的规格）
+     * 更新指定ASIN的规格信息（核心：设置title属性显示完整文本）
      * @param {string} asin - ASIN码
      * @param {string} spec - 拼接后的规格字符串
      */
@@ -409,7 +416,10 @@
         if (!asinRowMap.has(asin)) return;
         const row = asinRowMap.get(asin);
         const sizeCell = row.cells[SIZE_COL_INDEX];
-        sizeCell.textContent = spec || '无数据';
+        const displayText = spec || '无数据';
+        // 核心修改：同时设置显示文本和title（title显示完整内容）
+        sizeCell.textContent = displayText;
+        sizeCell.title = displayText;
     }
 
     // ========== 4. 核心查询逻辑 ==========
@@ -457,7 +467,7 @@
                     return;
                 }
 
-                // 遍历更新销量+规格（核心修改：调用拼接函数）
+                // 遍历更新销量+规格
                 data.data.list.forEach(item => {
                     updateAsinSales(item.asin, site.code, item.sales);
                     // 仅英国站点请求时更新规格，避免重复
