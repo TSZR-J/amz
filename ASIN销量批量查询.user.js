@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ASIN销量查询（弹窗版）
 // @namespace    http://tampermonkey.net/
-// @version      2.0
-// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN单元格支持点击复制，规格列=color-size+悬停显示完整文本+清空按钮+表格滚动条
+// @version      2.1
+// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN单元格支持点击复制，规格列=color-size+悬停显示完整文本+清空按钮+智赢登录跳转+表格滚动条
 // @author       You
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
@@ -113,11 +113,12 @@
             line-height: 1.5;
         }
 
-        /* 按钮容器（查询+清空） */
+        /* 按钮容器（查询+清空+登录）- 适配三个按钮布局 */
         .btn-group {
             display: flex;
             gap: 12px;
             margin-bottom: 20px;
+            flex-wrap: wrap; /* 适配小屏幕，按钮自动换行 */
         }
 
         /* 查询按钮 */
@@ -136,7 +137,7 @@
             background: #005a9e;
         }
 
-        /* 清空按钮（新增） */
+        /* 清空按钮 */
         #modalClearBtn {
             padding: 10px 25px;
             background: #f56c6c;
@@ -150,6 +151,22 @@
         }
         #modalClearBtn:hover {
             background: #e64949;
+        }
+
+        /* 智赢登录按钮（新增） */
+        #modalLoginBtn {
+            padding: 10px 25px;
+            background: #67c23a;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: background 0.3s;
+            flex: none;
+        }
+        #modalLoginBtn:hover {
+            background: #52af3a;
         }
 
         /* 表格容器 - 固定表头+tbody滚动 */
@@ -255,6 +272,8 @@
     ];
     const SIZE_COL_INDEX = 1;
     const API_URL = 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list';
+    // 新增：智赢登录网址配置
+    const ZYING_LOGIN_URL = 'https://amazon.zying.net/#/login';
     let asinRowMap = new Map();
 
     // ========== 3. 工具函数 ==========
@@ -393,7 +412,7 @@
     }
 
     /**
-     * 清空所有内容（新增核心函数）
+     * 清空所有内容
      */
     function clearAllContent() {
         // 1. 清空ASIN输入框
@@ -403,8 +422,16 @@
         // 2. 重置表格到初始状态
         initAsinTable();
 
-        // 3. 可选：聚焦输入框，提升体验
+        // 3. 聚焦输入框
         asinInput.focus();
+    }
+
+    /**
+     * 跳转到智赢登录页面（新增核心函数）
+     */
+    function jumpToZyingLogin() {
+        // 打开新标签页跳转，避免关闭当前查询页面
+        window.open(ZYING_LOGIN_URL, '_blank');
     }
 
     /**
@@ -522,7 +549,7 @@
         modalMask.id = 'asinQueryModalMask';
         document.body.appendChild(modalMask);
 
-        // 弹窗主体（新增清空按钮）
+        // 弹窗主体（新增智赢登录按钮）
         const modal = document.createElement('div');
         modal.id = 'asinQueryModal';
         modal.innerHTML = `
@@ -536,10 +563,11 @@ B08XXXXXXX
 B09XXXXXXX"></textarea>
             </div>
 
-            <!-- 新增：按钮容器（查询+清空） -->
+            <!-- 按钮容器（查询+清空+智赢登录） -->
             <div class="btn-group">
                 <button id="modalQueryBtn">开始查询</button>
                 <button id="modalClearBtn">清空内容</button>
+                <button id="modalLoginBtn">点击登录智赢</button>
             </div>
 
             <div class="modal-form-group">
@@ -588,8 +616,11 @@ B09XXXXXXX"></textarea>
         // 查询按钮
         document.getElementById('modalQueryBtn').addEventListener('click', initQuery);
 
-        // 清空按钮（新增）
+        // 清空按钮
         document.getElementById('modalClearBtn').addEventListener('click', clearAllContent);
+
+        // 智赢登录按钮（新增）
+        document.getElementById('modalLoginBtn').addEventListener('click', jumpToZyingLogin);
     }
 
     // 页面加载完成后渲染
