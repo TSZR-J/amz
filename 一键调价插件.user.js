@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         一键调价插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.7
+// @version      1.0.8
 // @description  获取当前需调价的商品
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/一键调价插件.user.js
@@ -532,9 +532,9 @@
         const buttonsConfig = [
             { id: 'locate-prev', text: '定位下一个需调价商品', onClick: handleLocatePrev },
             { id: 'auto-adjust', text: '自动调价', onClick: handleAutoAdjust },
-            { id: 'locate-next', text: '滚动到最底部', onClick: handleLocateNext },
             { id: 'inspection-registration', text: '校验本国注册', onClick: inspectionRegistration },
-            { id: 'inspection-registration', text: '自动调库存', onClick: handleAutoAdjustInventory }
+            { id: 'inspection-registration', text: '自动调库存', onClick: handleAutoAdjustInventory },
+            { id: 'locate-next', text: '滚动到最底部↓↓↓', onClick: handleLocateNext }
         ];
 
         // 创建按钮
