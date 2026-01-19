@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         一键调价插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.6
+// @version      1.0.7
 // @description  获取当前需调价的商品
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/一键调价插件.user.js
@@ -446,6 +446,49 @@
         }
     }
 
+    function autoAdjustInventory() {
+    // 获取所有符合条件的表格单元格
+    const tableCells = document.querySelectorAll('.TableCell-module__cellLayout--dcdTa.JanusTable-module__janusCell2--CqIZY');
+    let i = 0;
+
+    // 遍历每个单元格
+    tableCells.forEach(cell => {
+        // 获取价格输入框数组（有多个元素，索引0/1/2分别对应不同价格项）
+        const priceInputs = cell.querySelectorAll('kat-input-group');
+
+        // 正确逻辑：priceInputs[1] = 最低价、priceInputs[2] = 最高价，childNodes只有1个（取[0]）
+        let minPrice = parseFloat(priceInputs[1]?.childNodes[1]?.value) || NaN;
+        let maxPrice = parseFloat(priceInputs[2]?.childNodes[1]?.value) || NaN;
+
+        // 判断最低价和最高价都不为空（有效数字且大于0）
+        const isMinMaxValid = !isNaN(minPrice) && minPrice > 0 && !isNaN(maxPrice) && maxPrice > 0;
+
+        // 仅当最低价和最高价都有效时，执行库存调整
+        if (isMinMaxValid) {
+            // 找到相邻的指定div
+            const adjacentDiv = cell.parentElement?.querySelectorAll('.TableCell-module__cellLayout--dcdTa.JanusTable-module__janusCell1--SdDkI');
+
+            if (adjacentDiv[1]) {
+                const targetInputGroup = adjacentDiv[1].querySelector('kat-input-group');
+                const targetInput = targetInputGroup?.childNodes[0]; // 子节点仅1个，取[0]
+                if (targetInput) {
+                    targetInput.value = 100; // 库存值赋值为100
+                    const changeEvent = new Event('change', { bubbles: true });
+                    targetInput.dispatchEvent(changeEvent); // 触发change事件
+                    i++; // 仅成功调整时计数
+                }
+            }
+        }
+    });
+
+    // 库存调整提示语
+    if (i > 0) {
+        showNotification(`共调整${i}个商品的库存，请仔细检查后提交`);
+    } else {
+        showNotification(`未找到需要调整库存的商品（无有效最低价/最高价）`);
+    }
+}
+
     // 导航
     // 检测URL并创建悬浮按钮
     function initInventoryAssistant() {
@@ -490,7 +533,8 @@
             { id: 'locate-prev', text: '定位下一个需调价商品', onClick: handleLocatePrev },
             { id: 'auto-adjust', text: '自动调价', onClick: handleAutoAdjust },
             { id: 'locate-next', text: '滚动到最底部', onClick: handleLocateNext },
-            { id: 'inspection-registration', text: '校验本国注册', onClick: inspectionRegistration }
+            { id: 'inspection-registration', text: '校验本国注册', onClick: inspectionRegistration },
+            { id: 'inspection-registration', text: '自动调库存', onClick: handleAutoAdjustInventory }
         ];
 
         // 创建按钮
@@ -551,6 +595,12 @@
         autoAdjustPrice();
     }
 
+    function handleAutoAdjustInventory() {
+        console.log('自动调价功能已触发');
+        // 预留：添加自动调价逻辑
+        autoAdjustInventory();
+    }
+
     function handleLocateNext() {
         console.log('定位下一个功能已触发');
         scrollToBottom();
@@ -575,6 +625,7 @@
         createButtons: createFloatingButtons,
         locatePrev: handleLocatePrev,
         autoAdjust: handleAutoAdjust,
+        autoAdjustInventory: handleAutoAdjustInventory,
         locateNext: handleLocateNext
     };
 })();
