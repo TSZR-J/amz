@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ASIN销量查询（弹窗版）
 // @namespace    http://tampermonkey.net/
-// @version      2.1
-// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN单元格支持点击复制，规格列=color-size+悬停显示完整文本+清空按钮+智赢登录跳转+表格滚动条
+// @version      2.2
+// @description  任意网页底部添加ASIN销量查询按钮，弹窗内完成查询并表格展示结果，ASIN列支持多选+右键复制选中ASIN，规格列=color-size+悬停显示完整文本+清空按钮+智赢登录跳转+表格滚动条
 // @author       You
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
@@ -17,7 +17,24 @@
 (function() {
     'use strict';
 
-    // ========== 1. 注入全局样式 ==========
+    // ========== 1. 全局变量 & 配置 ==========
+    // 亚马逊站点配置
+    const amazonSites = [
+        { name: "英国", code: "GB", colIndex: 2 },
+        { name: "法国", code: "FR", colIndex: 3 },
+        { name: "德国", code: "DE", colIndex: 4 },
+        { name: "意大利", code: "IT", colIndex: 5 },
+        { name: "西班牙", code: "ES", colIndex: 6 }
+    ];
+    const SIZE_COL_INDEX = 1;
+    const API_URL = 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list';
+    const ZYING_LOGIN_URL = 'https://amazon.zying.net/#/login';
+    // 新增：存储选中的ASIN
+    let selectedAsins = new Set();
+    // 新增：ASIN行映射（扩展存储单元格元素）
+    let asinRowMap = new Map(); // 格式：asin → { row: tr元素, cell: td元素 }
+
+    // ========== 2. 注入全局样式 ==========
     GM_addStyle(`
         /* 底部触发按钮 */
         #asinQueryBtn {
@@ -113,12 +130,12 @@
             line-height: 1.5;
         }
 
-        /* 按钮容器（查询+清空+登录）- 适配三个按钮布局 */
+        /* 按钮容器（查询+清空+登录） */
         .btn-group {
             display: flex;
             gap: 12px;
             margin-bottom: 20px;
-            flex-wrap: wrap; /* 适配小屏幕，按钮自动换行 */
+            flex-wrap: wrap;
         }
 
         /* 查询按钮 */
@@ -153,7 +170,7 @@
             background: #e64949;
         }
 
-        /* 智赢登录按钮（新增） */
+        /* 智赢登录按钮 */
         #modalLoginBtn {
             padding: 10px 25px;
             background: #67c23a;
@@ -232,16 +249,45 @@
             font-size: 14px;
         }
 
-        /* ASIN单元格复制样式 */
+        /* ASIN单元格样式 - 新增选中状态 */
         .asin-cell {
             cursor: pointer !important;
             color: #0078d7;
             text-decoration: underline;
             user-select: none;
+            transition: background 0.2s;
         }
         .asin-cell:hover {
             color: #005a9e;
             text-decoration: none;
+        }
+        /* 选中的ASIN单元格样式 */
+        .asin-cell.selected {
+            background: #409eff;
+            color: white;
+            font-weight: bold;
+            border-radius: 2px;
+        }
+
+        /* 自定义右键菜单（新增） */
+        #customContextMenu {
+            position: fixed;
+            width: 160px;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            z-index: 10005;
+            display: none;
+        }
+        #customContextMenu .menu-item {
+            padding: 8px 12px;
+            font-size: 14px;
+            cursor: pointer;
+            color: #333;
+        }
+        #customContextMenu .menu-item:hover {
+            background: #f0f7ff;
         }
 
         /* 复制成功提示框样式 */
@@ -262,20 +308,6 @@
         }
     `);
 
-    // ========== 2. 核心配置 ==========
-    const amazonSites = [
-        { name: "英国", code: "GB", colIndex: 2 },
-        { name: "法国", code: "FR", colIndex: 3 },
-        { name: "德国", code: "DE", colIndex: 4 },
-        { name: "意大利", code: "IT", colIndex: 5 },
-        { name: "西班牙", code: "ES", colIndex: 6 }
-    ];
-    const SIZE_COL_INDEX = 1;
-    const API_URL = 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list';
-    // 新增：智赢登录网址配置
-    const ZYING_LOGIN_URL = 'https://amazon.zying.net/#/login';
-    let asinRowMap = new Map();
-
     // ========== 3. 工具函数 ==========
     /**
      * 移除字符串首尾的引号
@@ -289,7 +321,7 @@
     }
 
     /**
-     * 复制文本到剪贴板
+     * 复制文本到剪贴板（通用函数）
      */
     function copyTextToClipboard(text) {
         try {
@@ -310,8 +342,8 @@
             }
             return true;
         } catch (err) {
-            console.error('ASIN复制失败:', err);
-            alert('复制失败，请手动复制ASIN！');
+            console.error('复制失败:', err);
+            alert('复制失败，请手动复制！');
             return false;
         }
     }
@@ -319,7 +351,7 @@
     /**
      * 显示复制成功提示框
      */
-    function showCopyToast(asin) {
+    function showCopyToast(text) {
         let toast = document.getElementById('copyToast');
         if (!toast) {
             toast = document.createElement('div');
@@ -327,7 +359,7 @@
             toast.className = 'copy-toast';
             document.body.appendChild(toast);
         }
-        toast.textContent = `【${asin}】复制成功`;
+        toast.textContent = text;
         toast.style.display = 'block';
         toast.style.opacity = '1';
         setTimeout(() => {
@@ -356,6 +388,82 @@
         }
     }
 
+    // ========== 4. ASIN多选 & 右键复制功能（核心新增） ==========
+    /**
+     * 切换ASIN选中状态
+     * @param {string} asin - 要切换的ASIN
+     * @param {HTMLElement} cell - ASIN单元格元素
+     */
+    function toggleAsinSelect(asin, cell) {
+        if (selectedAsins.has(asin)) {
+            // 取消选中
+            selectedAsins.delete(asin);
+            cell.classList.remove('selected');
+        } else {
+            // 选中
+            selectedAsins.add(asin);
+            cell.classList.add('selected');
+        }
+    }
+
+    /**
+     * 复制选中的ASIN（换行分隔）
+     */
+    function copySelectedAsins() {
+        if (selectedAsins.size === 0) {
+            showCopyToast('暂无选中的ASIN');
+            return;
+        }
+        // 转换为换行分隔的字符串
+        const asinText = Array.from(selectedAsins).join('\n');
+        if (copyTextToClipboard(asinText)) {
+            showCopyToast(`已复制 ${selectedAsins.size} 个ASIN`);
+        }
+        // 关闭右键菜单
+        hideContextMenu();
+    }
+
+    /**
+     * 显示自定义右键菜单
+     * @param {MouseEvent} e - 鼠标事件
+     */
+    function showContextMenu(e) {
+        // 阻止默认右键菜单
+        e.preventDefault();
+        // 只有表格内右键才显示
+        if (!e.target.closest('#resultTable')) return;
+
+        const menu = document.getElementById('customContextMenu');
+        // 定位菜单到鼠标位置
+        menu.style.left = `${e.clientX}px`;
+        menu.style.top = `${e.clientY}px`;
+        menu.style.display = 'block';
+
+        // 禁用菜单的默认右键
+        menu.addEventListener('contextmenu', (ev) => ev.preventDefault());
+    }
+
+    /**
+     * 隐藏自定义右键菜单
+     */
+    function hideContextMenu() {
+        const menu = document.getElementById('customContextMenu');
+        if (menu) menu.style.display = 'none';
+    }
+
+    /**
+     * 清空所有选中状态
+     */
+    function clearAllSelected() {
+        // 清空选中集合
+        selectedAsins.clear();
+        // 移除所有ASIN单元格的选中样式
+        document.querySelectorAll('.asin-cell.selected').forEach(cell => {
+            cell.classList.remove('selected');
+        });
+    }
+
+    // ========== 5. 表格初始化 & 更新函数 ==========
     /**
      * 初始化ASIN表格（空状态/初始提示）
      */
@@ -363,6 +471,8 @@
         const tableBody = document.getElementById('tableBody');
         tableBody.innerHTML = '';
         asinRowMap.clear();
+        // 清空选中状态
+        clearAllSelected();
 
         // 无ASIN时显示初始提示
         if (asins.length === 0) {
@@ -380,14 +490,20 @@
         asins.forEach(asin => {
             const row = document.createElement('tr');
 
-            // ASIN列
+            // ASIN列 - 新增多选逻辑
             const asinCell = document.createElement('td');
             asinCell.textContent = asin;
             asinCell.className = 'asin-cell';
             asinCell.title = asin;
-            asinCell.addEventListener('click', () => {
-                if (copyTextToClipboard(asin)) {
-                    showCopyToast(asin);
+            // 点击切换选中状态（优先于原复制逻辑）
+            asinCell.addEventListener('click', (e) => {
+                e.stopPropagation();
+                toggleAsinSelect(asin, asinCell);
+                // 原单个复制逻辑：Ctrl+点击 或 未选中时点击（可选，保留原单复制）
+                if (e.ctrlKey || !selectedAsins.has(asin)) {
+                    if (copyTextToClipboard(asin)) {
+                        showCopyToast(`【${asin}】复制成功`);
+                    }
                 }
             });
             row.appendChild(asinCell);
@@ -407,12 +523,13 @@
             }
 
             tableBody.appendChild(row);
-            asinRowMap.set(asin, row);
+            // 更新行映射：存储row和cell
+            asinRowMap.set(asin, { row, cell: asinCell });
         });
     }
 
     /**
-     * 清空所有内容
+     * 清空所有内容（包含选中状态）
      */
     function clearAllContent() {
         // 1. 清空ASIN输入框
@@ -427,10 +544,9 @@
     }
 
     /**
-     * 跳转到智赢登录页面（新增核心函数）
+     * 跳转到智赢登录页面
      */
     function jumpToZyingLogin() {
-        // 打开新标签页跳转，避免关闭当前查询页面
         window.open(ZYING_LOGIN_URL, '_blank');
     }
 
@@ -439,7 +555,7 @@
      */
     function updateAsinSales(asin, code, sales) {
         if (!asinRowMap.has(asin)) return;
-        const row = asinRowMap.get(asin);
+        const { row } = asinRowMap.get(asin);
         const site = amazonSites.find(item => item.code === code);
         if (!site) return;
 
@@ -457,14 +573,14 @@
      */
     function updateAsinSize(asin, spec) {
         if (!asinRowMap.has(asin)) return;
-        const row = asinRowMap.get(asin);
+        const { row } = asinRowMap.get(asin);
         const sizeCell = row.cells[SIZE_COL_INDEX];
         const displayText = spec || '无数据';
         sizeCell.textContent = displayText;
         sizeCell.title = displayText;
     }
 
-    // ========== 4. 核心查询逻辑 ==========
+    // ========== 6. 核心查询逻辑 ==========
     function sendAsinRequest(site, asins, token) {
         const timestamp = Math.round(new Date().getTime() / 1000).toString();
         const requestData = JSON.stringify({
@@ -536,20 +652,28 @@
         });
     }
 
-    // ========== 5. 渲染DOM ==========
+    // ========== 7. 渲染DOM & 事件绑定 ==========
     function renderDOM() {
-        // 底部触发按钮
+        // 1. 创建底部触发按钮
         const bottomBtn = document.createElement('button');
         bottomBtn.id = 'asinQueryBtn';
         bottomBtn.textContent = 'ASIN销量查询';
         document.body.appendChild(bottomBtn);
 
-        // 弹窗遮罩
+        // 2. 创建弹窗遮罩
         const modalMask = document.createElement('div');
         modalMask.id = 'asinQueryModalMask';
         document.body.appendChild(modalMask);
 
-        // 弹窗主体（新增智赢登录按钮）
+        // 3. 创建自定义右键菜单（新增）
+        const contextMenu = document.createElement('div');
+        contextMenu.id = 'customContextMenu';
+        contextMenu.innerHTML = `
+            <div class="menu-item" id="copySelectedAsins">复制选中的ASIN</div>
+        `;
+        document.body.appendChild(contextMenu);
+
+        // 4. 创建弹窗主体
         const modal = document.createElement('div');
         modal.id = 'asinQueryModal';
         modal.innerHTML = `
@@ -563,11 +687,10 @@ B08XXXXXXX
 B09XXXXXXX"></textarea>
             </div>
 
-            <!-- 按钮容器（查询+清空+智赢登录） -->
             <div class="btn-group">
                 <button id="modalQueryBtn">开始查询</button>
                 <button id="modalClearBtn">清空内容</button>
-                <button id="modalLoginBtn">点击登录智赢</button>
+                <button id="modalLoginBtn">智赢登录</button>
             </div>
 
             <div class="modal-form-group">
@@ -576,7 +699,7 @@ B09XXXXXXX"></textarea>
                     <table id="resultTable">
                         <thead>
                             <tr>
-                                <th>ASIN</th>
+                                <th>ASIN（点击多选）</th>
                                 <th>规格</th>
                                 <th>英国</th>
                                 <th>法国</th>
@@ -596,7 +719,7 @@ B09XXXXXXX"></textarea>
         `;
         document.body.appendChild(modal);
 
-        // 绑定事件
+        // ========== 事件绑定 ==========
         // 底部按钮打开弹窗
         bottomBtn.addEventListener('click', () => {
             modalMask.style.display = 'block';
@@ -607,20 +730,30 @@ B09XXXXXXX"></textarea>
         modalMask.addEventListener('click', () => {
             modalMask.style.display = 'none';
             modal.style.display = 'none';
+            hideContextMenu(); // 关闭右键菜单
         });
         document.getElementById('modalCloseBtn').addEventListener('click', () => {
             modalMask.style.display = 'none';
             modal.style.display = 'none';
+            hideContextMenu();
         });
 
-        // 查询按钮
+        // 查询/清空/登录按钮
         document.getElementById('modalQueryBtn').addEventListener('click', initQuery);
-
-        // 清空按钮
         document.getElementById('modalClearBtn').addEventListener('click', clearAllContent);
-
-        // 智赢登录按钮（新增）
         document.getElementById('modalLoginBtn').addEventListener('click', jumpToZyingLogin);
+
+        // 右键菜单事件
+        // 表格区域右键显示自定义菜单
+        document.getElementById('resultTable').addEventListener('contextmenu', showContextMenu);
+        // 点击复制选中的ASIN
+        document.getElementById('copySelectedAsins').addEventListener('click', copySelectedAsins);
+        // 点击页面其他区域关闭右键菜单
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#customContextMenu')) {
+                hideContextMenu();
+            }
+        });
     }
 
     // 页面加载完成后渲染
