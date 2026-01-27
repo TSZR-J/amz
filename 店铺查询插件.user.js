@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.17
+// @version      1.0.18
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -116,7 +116,6 @@
         "chenxikunbune;陈西堃",
         "niehongrongbune;聂洪荣",
         "KaiFengJinHuiFuZhuangYouXianGongSi;陆书师",
-        "HuGuanXianGanShengJianZhuYouXianGongSi;李熙乾",
         "meiyongqiugdjsa;梅咏秋",
         "SHULEI0915;舒蕾",
         "chongyixianchangqingnongzijingxiaodian;刘常青",
@@ -127,7 +126,13 @@
         "liaochunhua888888;廖春花",
         "penggougen888888;彭苟根",
         "huangmin888888;黄敏",
-        "huangjingen888888;黄金根"
+        "huangjingen888888;黄金根",
+        "xinyushideyimaoyiyouxiangongsi;钱春华",
+        "chenxilanawdaw;陈锡岚",
+        "xinyushidengkaimaoyiyouxiangongsi;薛园琴",
+        "xinyushizhiyunshangmaoyouxiangongsi;舒兵太",
+        "xinyushiqiyumaoyiyouxiangongsi;吴双娥",
+        "xinyushiguizemaoyiyouxiangongsi;吴建贵"
     ];
 
     // 创建亚马逊站点数据数组
@@ -276,7 +281,7 @@
                 let data = JSON.parse(response.responseText);
                 if(data.code === 401)
                 {
-                    addAsinLabel("https://amazon.zying.net/#/bigData",item, asin,'智赢插件登录失效，请跳转重新登录',0);
+                    addAsinLabel("https://amazon.zying.net/#/login",item, asin,'智赢插件登录失效，请跳转重新登录',0);
                     return;
                 }
                 // 执行解析并打印结果
