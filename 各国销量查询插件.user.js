@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         各国销量查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.5
+// @version      1.0.6
 // @description  查询各国销量
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/各国销量查询插件.user.js
@@ -252,7 +252,7 @@ function getSalesData(data) {
                 let data = JSON.parse(response.responseText);
                 if(data.code === 401)
                 {
-                    addAsinLabel("https://amazon.zying.net/#/bigData",item, asin,'智赢插件登录失效，请跳转重新登录',0);
+                    addAsinLabel("https://amazon.zying.net/#/login",item, asin,'智赢插件登录失效，请跳转重新登录',0);
                     return;
                 }
                 // 执行解析并打印结果
