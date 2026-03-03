@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         ASIN销量查询（弹窗版）
 // @namespace    http://tampermonkey.net/
-// @version      3.3
-// @description  单击选中+复制当前ASIN+右键复制选中（字体清晰+精准居中）
+// @version      3.4
+// @description  单击选中+复制当前ASIN+右键复制选中（字体清晰+精准居中+完整智赢登录）
 // @author       You
 // @match        *://*/*
 // @grant        GM.xmlHttpRequest
@@ -34,11 +34,30 @@
     let asinSpecCache = new Map();
     const domain = new URL(window.location.href).hostname;
 
+    // ===== 恢复完整的Token获取和登录逻辑 =====
     let token;
+    // 1. 从当前页面(localStorage)获取token（如果在智赢页面）
     if (domain === 'amazon.zying.net') {
         token = localStorage.getItem("token")?.replace(/"/g, '');
         GM_setValue("token", token);
+    } else {
+        // 2. 从油猴存储中获取已保存的token
+        token = GM_getValue("token", "");
     }
+
+    // 3. 监听token变化，实时更新
+    function refreshToken() {
+        if (domain === 'amazon.zying.net') {
+            const newToken = localStorage.getItem("token")?.replace(/"/g, '');
+            if (newToken && newToken !== token) {
+                token = newToken;
+                GM_setValue("token", token);
+                showCopyToast("Token已更新，可正常查询");
+            }
+        }
+    }
+    // 定时刷新token（每3秒检查一次）
+    setInterval(refreshToken, 3000);
 
     const sellerIdToPerson = new Map();
     [
@@ -56,7 +75,7 @@
         id && sellerIdToPerson.set(id.trim().toLowerCase(), name.trim());
     });
 
-    // 核心修复：字体清晰 + 弹窗精准居中
+    // 核心样式：字体清晰 + 弹窗精准居中
     GM_addStyle(`
         #asinQueryBtn {
             position:fixed;bottom:20px;right:20px;padding:12px 30px;background:#0078d7;color:white;
@@ -199,7 +218,7 @@
         }
     }
 
-    // 工具函数：显示复制提示
+    // 工具函数：显示复制/提示信息
     function showCopyToast(text) {
         let t = document.getElementById('copyToast');
         if (!t) {
@@ -211,6 +230,33 @@
         t.textContent = text;
         t.style.display = 'block';
         setTimeout(() => t.style.display = 'none', 1500);
+    }
+
+    // ===== 恢复智赢登录按钮点击逻辑 =====
+    function openZyingLogin() {
+        // 打开新标签页跳转到智赢登录页面
+        const loginTab = window.open(ZYING_LOGIN_URL, '_blank');
+        // 提示用户登录
+        showCopyToast("请在新标签页完成智赢登录");
+
+        // 监听登录状态（可选：如果需要主动检测）
+        const checkLoginInterval = setInterval(() => {
+            try {
+                // 尝试获取新标签页的localStorage（仅同域下有效）
+                if (loginTab.closed) {
+                    clearInterval(checkLoginInterval);
+                    // 重新获取token
+                    token = GM_getValue("token", "");
+                    if (token) {
+                        showCopyToast("登录成功，Token已加载");
+                    } else {
+                        showCopyToast("请重新登录智赢平台");
+                    }
+                }
+            } catch (e) {
+                // 跨域无法访问，不影响主逻辑
+            }
+        }, 2000);
     }
 
     // 核心逻辑：单击切换选中 + 复制当前ASIN
@@ -422,7 +468,7 @@
 
     async function processRequests(allAsins, token) {
         const batches = chunkArray(allAsins, BATCH_SIZE);
-        const delay = 100;
+        const delay = 200;
         for (const site of amazonSites) {
             for (const b of batches) {
                 await new Promise(r => setTimeout(r, delay));
@@ -442,7 +488,7 @@
     function renderDOM() {
         const btn = document.createElement('button');
         btn.id = 'asinQueryBtn';
-        btn.textContent = 'ASIN销量查询(V3.2)';
+        btn.textContent = 'ASIN销量查询(V3.4)';
         btn.onclick = () => {
             document.getElementById('asinQueryModalMask').style.display = 'block';
             document.getElementById('asinQueryModal').style.display = 'block';
@@ -461,7 +507,7 @@
         modal.id = 'asinQueryModal';
         modal.innerHTML = `
             <div id="modalCloseBtn" onclick="document.getElementById('asinQueryModalMask').style.display='none';this.parentElement.style.display='none'">×</div>
-            <h3 style="text-align:center;">ASIN销量查询工具（V3.2）</h3>
+            <h3 style="text-align:center;">ASIN销量查询工具（V3.4）</h3>
             <div class="modal-form-group">
                 <label>ASIN输入（一行一个）：</label>
                 <textarea id="modalAsinInput" placeholder="B0C84J3HFR\nB08XXXXXXX"></textarea>
@@ -490,11 +536,15 @@
         `;
         document.body.appendChild(modal);
 
+        // 绑定按钮点击事件
         document.getElementById('modalQueryBtn').onclick = initQuery;
         document.getElementById('modalClearBtn').onclick = () => {
             document.getElementById('modalAsinInput').value = '';
             initAsinTable();
         };
+        // ===== 绑定智赢登录按钮点击事件 =====
+        document.getElementById('modalLoginBtn').onclick = openZyingLogin;
+
         initAsinTable();
     }
 
