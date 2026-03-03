@@ -2,6 +2,8 @@
 // @name         ASIN销量查询(v3.5)（弹窗版）
 // @namespace    http://tampermonkey.net/
 // @version      3.5
+// @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
+// @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
 // @description  单击选中+复制/右键复制（清晰+居中+登录+表格滚动修复）
 // @author       You
 // @match        *://*/*
