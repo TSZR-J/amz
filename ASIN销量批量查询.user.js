@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         ASIN销量查询（弹窗版）
+// @name         ASIN销量查询(v3.5)（弹窗版）
 // @namespace    http://tampermonkey.net/
-// @version      3.4
-// @description  单击选中+复制当前ASIN+右键复制选中（字体清晰+精准居中+完整智赢登录）
+// @version      3.5
+// @description  单击选中+复制/右键复制（清晰+居中+登录+表格滚动修复）
 // @author       You
 // @match        *://*/*
 // @grant        GM.xmlHttpRequest
@@ -34,29 +34,24 @@
     let asinSpecCache = new Map();
     const domain = new URL(window.location.href).hostname;
 
-    // ===== 恢复完整的Token获取和登录逻辑 =====
     let token;
-    // 1. 从当前页面(localStorage)获取token（如果在智赢页面）
     if (domain === 'amazon.zying.net') {
         token = localStorage.getItem("token")?.replace(/"/g, '');
         GM_setValue("token", token);
     } else {
-        // 2. 从油猴存储中获取已保存的token
         token = GM_getValue("token", "");
     }
 
-    // 3. 监听token变化，实时更新
     function refreshToken() {
         if (domain === 'amazon.zying.net') {
             const newToken = localStorage.getItem("token")?.replace(/"/g, '');
             if (newToken && newToken !== token) {
                 token = newToken;
                 GM_setValue("token", token);
-                showCopyToast("Token已更新，可正常查询");
+                showCopyToast("Token已更新");
             }
         }
     }
-    // 定时刷新token（每3秒检查一次）
     setInterval(refreshToken, 3000);
 
     const sellerIdToPerson = new Map();
@@ -75,135 +70,90 @@
         id && sellerIdToPerson.set(id.trim().toLowerCase(), name.trim());
     });
 
-    // 核心样式：字体清晰 + 弹窗精准居中
     GM_addStyle(`
         #asinQueryBtn {
             position:fixed;bottom:20px;right:20px;padding:12px 30px;background:#0078d7;color:white;
             border:none;border-radius:4px;font-size:16px;cursor:pointer;z-index:9998;
-            -webkit-font-smoothing: antialiased; /* 抗锯齿 */
-            -moz-osx-font-smoothing: grayscale; /* 抗锯齿 */
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
         #asinQueryModalMask {
             position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);
             z-index:9999;display:none;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
         }
         #asinQueryModal {
-            position:fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            margin: auto; /* 绝对居中核心 */
-            width:95%;max-width:1000px;
-            height: fit-content;
-            max-height:80vh;
-            background:#f5f5f5;
-            border-radius:8px;padding:20px;box-shadow:0 4px 20px rgba(0,0,0,0.3);
-            z-index:10000;display:none;
-            overflow-y:auto;
-            -webkit-font-smoothing: antialiased; /* 强制抗锯齿 */
-            -moz-osx-font-smoothing: grayscale; /* 强制抗锯齿 */
-            font-smooth: always; /* 字体平滑 */
+            position:fixed; top:0; left:0; right:0; bottom:0; margin:auto;
+            width:95%;max-width:1000px; height:fit-content; max-height:85vh;
+            background:#f5f5f5; border-radius:8px; padding:20px; box-shadow:0 4px 20px rgba(0,0,0,0.3);
+            z-index:10000; display:none; overflow:hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
         #modalCloseBtn {
             position:absolute;top:15px;right:15px;width:30px;height:30px;line-height:30px;
             text-align:center;background:#eee;border-radius:50%;cursor:pointer;font-size:18px;color:#666;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
         }
         .modal-form-group { margin-bottom:20px; }
-        .modal-form-group label {
-            display:block;font-weight:bold;margin-bottom:8px;color:#333;font-size:14px;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
+        .modal-form-group label { display:block;font-weight:bold;margin-bottom:8px;color:#333;font-size:14px; }
         .modal-form-group textarea {
             width:100%;padding:10px;border:1px solid #ddd;border-radius:4px;font-size:14px;
             box-sizing:border-box;height:120px;resize:vertical;
-            -webkit-font-smoothing: antialiased; /* 输入框文字抗锯齿 */
-            -moz-osx-font-smoothing: grayscale;
-            font-family: "Microsoft YaHei", Arial, sans-serif; /* 固定字体 */
         }
         .btn-group { display:flex;gap:12px;margin-bottom:20px;flex-wrap:wrap; }
         #modalQueryBtn,#modalClearBtn,#modalLoginBtn {
             padding:10px 25px;border:none;border-radius:4px;cursor:pointer;color:#fff;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
         }
         #modalQueryBtn { background:#0078d7; }
         #modalClearBtn { background:#f56c6c; }
         #modalLoginBtn { background:#67c23a; }
+
+        /* ========== 表格滚动彻底修复 ========== */
         .table-container {
-            width:100%;background:#fff;border-radius:4px;border:1px solid #ddd;
-            max-height:400px;overflow:hidden;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
+            width: 100%;
+            max-height: 420px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background: #fff;
         }
         #resultTable {
-            width:100%;border-collapse:collapse;text-align:center;table-layout:fixed;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
+            width: 100%;
+            border-collapse: collapse;
+            table-layout: fixed;
+        }
+        #resultTable thead {
+            position: sticky;
+            top: 0;
+            background: #0078d7;
+            z-index: 1;
         }
         #resultTable th {
-            background:#0078d7;color:white;padding:12px 8px;font-weight:bold;font-size:14px;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
+            color:white; padding:12px 8px; font-weight:bold; font-size:14px;
         }
-        #resultTable tbody { display:block;width:100%;max-height:350px;overflow-y:auto; }
-        #resultTable thead tr,#resultTable tbody tr { display:table;width:100%;table-layout:fixed; }
         #resultTable td {
-            padding:10px 8px;border:1px solid #ddd;font-size:13px;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
+            padding:10px 8px; border:1px solid #ddd; font-size:13px;
+            word-break: break-all;
         }
-        .asin-cell {
-            cursor:pointer;color:#0078d7;text-decoration:underline;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
-        }
+        .asin-cell { cursor:pointer;color:#0078d7;text-decoration:underline; }
         .asin-cell.selected { background:#409eff!important; color:white!important; font-weight:bold; }
+
         .copy-toast {
-            position:fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            margin: auto; /* 提示框绝对居中 */
-            width: 200px;
-            height: 50px;
-            line-height: 50px;
+            position:fixed; top:0; left:0; right:0; bottom:0; margin:auto;
+            width:200px; height:50px; line-height:50px;
             background:rgba(0,0,0,0.7);color:white;border-radius:6px;
-            font-size:14px;z-index:10002;display:none;
-            text-align: center;
-            -webkit-font-smoothing: antialiased;
-            -moz-osx-font-smoothing: grayscale;
+            font-size:14px;z-index:10002;display:none;text-align:center;
         }
         .seller-match-tip { margin-left:6px; font-size:12px; font-weight:bold!important; }
-        .seller-green { color:#00b42a!important; }
+        .seller-green { color:#0078d7!important; }
         .seller-red { color:#ff4d4f!important; }
-        .seller-gray { color:#909999!important; }
+        .seller-gray { color:#999!important; }
 
-        /* 统一滚动条样式 */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #ccc;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #999;
-        }
+        ::-webkit-scrollbar { width:8px; height:8px; }
+        ::-webkit-scrollbar-track { background:#f1f1f1; border-radius:4px; }
+        ::-webkit-scrollbar-thumb { background:#ccc; border-radius:4px; }
+        ::-webkit-scrollbar-thumb:hover { background:#999; }
     `);
 
-    // 工具函数：复制文本到剪贴板
     function copyTextToClipboard(text) {
         try {
             return navigator.clipboard.writeText(text);
@@ -218,7 +168,6 @@
         }
     }
 
-    // 工具函数：显示复制/提示信息
     function showCopyToast(text) {
         let t = document.getElementById('copyToast');
         if (!t) {
@@ -232,34 +181,11 @@
         setTimeout(() => t.style.display = 'none', 1500);
     }
 
-    // ===== 恢复智赢登录按钮点击逻辑 =====
     function openZyingLogin() {
-        // 打开新标签页跳转到智赢登录页面
-        const loginTab = window.open(ZYING_LOGIN_URL, '_blank');
-        // 提示用户登录
-        showCopyToast("请在新标签页完成智赢登录");
-
-        // 监听登录状态（可选：如果需要主动检测）
-        const checkLoginInterval = setInterval(() => {
-            try {
-                // 尝试获取新标签页的localStorage（仅同域下有效）
-                if (loginTab.closed) {
-                    clearInterval(checkLoginInterval);
-                    // 重新获取token
-                    token = GM_getValue("token", "");
-                    if (token) {
-                        showCopyToast("登录成功，Token已加载");
-                    } else {
-                        showCopyToast("请重新登录智赢平台");
-                    }
-                }
-            } catch (e) {
-                // 跨域无法访问，不影响主逻辑
-            }
-        }, 2000);
+        window.open(ZYING_LOGIN_URL, '_blank');
+        showCopyToast("请在新标签页登录智赢");
     }
 
-    // 核心逻辑：单击切换选中 + 复制当前ASIN
     function toggleSelectAndCopy(asin, tdEl) {
         if (selectedAsins.has(asin)) {
             selectedAsins.delete(asin);
@@ -272,15 +198,13 @@
         showCopyToast(`已复制：${asin}`);
     }
 
-    // 右键复制所有选中的ASIN
     function copySelectedOnRightClick(e) {
         e.preventDefault();
         if (selectedAsins.size === 0) {
             showCopyToast('未选中任何ASIN');
             return;
         }
-        const content = Array.from(selectedAsins).join('\n');
-        copyTextToClipboard(content);
+        copyTextToClipboard(Array.from(selectedAsins).join('\n'));
         showCopyToast(`已复制 ${selectedAsins.size} 个ASIN`);
     }
 
@@ -295,10 +219,8 @@
         return '无数据';
     }
 
-    // zbig 接口保留
     function sendBatchAsinDetailRequest(asins, code, token) {
         if (!token) return Promise.reject(new Error('token为空'));
-        if (!asins || !asins.length) return Promise.reject(new Error('ASIN为空'));
         return new Promise((resolve, reject) => {
             const ts = Math.round(Date.now()/1000)+'';
             const data = JSON.stringify(asins.map(a => ({ asin:a })));
@@ -313,14 +235,13 @@
                 data: data,
                 headers: {
                     'Content-Type':'application/json', Token:token, Version:v,
-                    Signature:sign, Timestamp:ts, Cookie:document.cookie
+                    Signature:sign, Timestamp:ts
                 },
                 onload(r) {
                     try { resolve(JSON.parse(r.responseText)) } catch(e) { reject(e) }
                 },
                 onerror: reject,
-                timeout: 10000,
-                ontimeout: reject
+                timeout: 10000
             });
         });
     }
@@ -348,20 +269,9 @@
                 const tip = found ? `（${found}）` : "（未跟卖）";
                 cell.innerHTML = `${sales}<span class="seller-match-tip ${cls}">${tip}</span>`;
             });
-        }).catch(() => {
-            asins.forEach(asin => {
-                const r = asinRowMap.get(asin)?.row;
-                if (!r) return;
-                const site = amazonSites.find(s => s.code === code);
-                if (site) {
-                    const cell = r.cells[site.colIndex];
-                    cell.innerHTML = `${salesMap[asin] || '无数据'}<span class="seller-match-tip seller-gray">（查询失败）</span>`;
-                }
-            });
-        });
+        }).catch(()=>{});
     }
 
-    // 初始化表格
     function initAsinTable(asins = []) {
         const tb = document.getElementById('tableBody');
         tb.innerHTML = '';
@@ -383,7 +293,6 @@
             asinSpecCache.set(asin, {});
             const tr = document.createElement('tr');
 
-            // ASIN列
             const asinTd = document.createElement('td');
             asinTd.className = "asin-cell";
             asinTd.textContent = asin;
@@ -391,12 +300,10 @@
             asinTd.oncontextmenu = copySelectedOnRightClick;
             tr.appendChild(asinTd);
 
-            // 规格列
             const specTd = document.createElement('td');
             specTd.textContent = "无数据";
             tr.appendChild(specTd);
 
-            // 5个站点列
             amazonSites.forEach(() => {
                 const td = document.createElement('td');
                 td.textContent = "加载中...";
@@ -434,7 +341,7 @@
                 data: data,
                 headers: {
                     'Content-Type':'application/json', Token:token, Version:"v1",
-                    Signature:sign, Timestamp:ts, Cookie:document.cookie
+                    Signature:sign, Timestamp:ts
                 },
                 onload(r) {
                     try {
@@ -456,12 +363,11 @@
                             if (row) row.cells[site.colIndex].textContent = salesMap[a];
                         });
                         batchUpdateSellerMatch(asins, site.code, salesMap, token);
-                    } catch(e) {}
+                    } catch(e){}
                     resolve();
                 },
                 onerror: () => resolve(),
-                timeout: 10000,
-                ontimeout: () => resolve()
+                timeout: 10000
             });
         });
     }
@@ -488,7 +394,7 @@
     function renderDOM() {
         const btn = document.createElement('button');
         btn.id = 'asinQueryBtn';
-        btn.textContent = 'ASIN销量查询(V3.4)';
+        btn.textContent = 'ASIN销量查询(v3.5)';
         btn.onclick = () => {
             document.getElementById('asinQueryModalMask').style.display = 'block';
             document.getElementById('asinQueryModal').style.display = 'block';
@@ -506,8 +412,8 @@
         const modal = document.createElement('div');
         modal.id = 'asinQueryModal';
         modal.innerHTML = `
-            <div id="modalCloseBtn" onclick="document.getElementById('asinQueryModalMask').style.display='none';this.parentElement.style.display='none'">×</div>
-            <h3 style="text-align:center;">ASIN销量查询工具（V3.4）</h3>
+            <div id="modalCloseBtn">×</div>
+            <h3 style="text-align:center;">ASIN销量查询(v3.5)</h3>
             <div class="modal-form-group">
                 <label>ASIN输入（一行一个）：</label>
                 <textarea id="modalAsinInput" placeholder="B0C84J3HFR\nB08XXXXXXX"></textarea>
@@ -521,7 +427,7 @@
                 <table id="resultTable">
                     <thead>
                         <tr>
-                            <th>ASIN（单击选中+复制/右键复制选中）</th>
+                            <th>ASIN（单击复制/右键多选）</th>
                             <th>规格</th>
                             <th>英国</th>
                             <th>法国</th>
@@ -536,13 +442,15 @@
         `;
         document.body.appendChild(modal);
 
-        // 绑定按钮点击事件
+        document.getElementById('modalCloseBtn').onclick = () => {
+            mask.style.display = 'none';
+            modal.style.display = 'none';
+        };
         document.getElementById('modalQueryBtn').onclick = initQuery;
         document.getElementById('modalClearBtn').onclick = () => {
             document.getElementById('modalAsinInput').value = '';
             initAsinTable();
         };
-        // ===== 绑定智赢登录按钮点击事件 =====
         document.getElementById('modalLoginBtn').onclick = openZyingLogin;
 
         initAsinTable();
