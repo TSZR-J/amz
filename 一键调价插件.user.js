@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         一键调价插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.9
+// @version      1.0.10
 // @description  获取当前需调价的商品，支持手动选择校验国家
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/一键调价插件.user.js
@@ -474,24 +474,31 @@
                     }
 
                     // 正常处理当前批次的每个ASIN
+                    // 新增：统计已注册的ASIN数量
+                    let registeredCount = 0;
                     batchAsins.forEach(asin => {
                         const brand = (resData.data[asin] || {}).BrandSourceDetails || [];
-                        // 优化点1：提前定义匹配条件，语义更清晰
                         const targetSource = amazonSites.code;
                         const targetStatus = '已注册';
-                        // 优化点2：用数组some方法替代for循环+break，更简洁
+
                         const isRegistered = brand.some(b => {
-                            // 优化点3：增加空值校验，避免b.Source/b.Status为undefined导致的判断错误
                             return b?.Source === targetSource && b?.Status === targetStatus;
                         });
 
-                        // 优化点4：简化条件分支，逻辑更直观
                         if (isRegistered) {
                             addAsinLabel(amazonSites.code, amazonSites.add, skuMap.get(asin), asin, amazonSites.name, 4);
+                            registeredCount++; // 已注册数量+1
                         } else {
                             addAsinLabel(amazonSites.code, amazonSites.add, skuMap.get(asin), asin, amazonSites.name, 0);
                         }
                     });
+
+                    // 新增：批次处理完成后，根据统计结果给出提示
+                    if (registeredCount > 0) {
+                        showNotification(`⚠️ 第${batchIndex + 1}批校验完成：找到${registeredCount}个${amazonSites.name}已注册商品，请仔细检查！`);
+                    } else {
+                        showNotification(`✅ 第${batchIndex + 1}批校验完成：未找到${amazonSites.name}已注册商品`);
+                    }
                 },
                 onerror: function(error) {
                     console.error(`❌ 第${batchIndex + 1}批请求网络失败：`, error);
