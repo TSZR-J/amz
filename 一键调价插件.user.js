@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         一键调价插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.10
+// @version      1.0.11
 // @description  获取当前需调价的商品，支持手动选择校验国家
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/一键调价插件.user.js
@@ -298,35 +298,21 @@
         let skuMap = new Map();
         // 2. 遍历每个div，DOM解析ASIN
         skuDivs.forEach((skuDiv, index) => {
-            const sku = skuDiv.getAttribute('data-sku');
-            let asin = null;
+        const sku = skuDiv.getAttribute('data-sku');
+        let asin = null;
 
-            // -------- 方式1：匹配"ASIN"标签后的内容（优先） --------
-            const asinLabelNodes = skuDiv.querySelectorAll('span, div');
-            for (const node of asinLabelNodes) {
-                if (node.innerText.trim() === 'ASIN') {
-                    const asinValueNode = node.parentElement?.nextElementSibling;
-                    if (asinValueNode) {
-                        const rawText = asinValueNode.innerText.trim();
-                        // 修复：从原始文本中提取有效ASIN
-                        asin = extractValidASINFromText(rawText);
-                        if (asin) break; // 找到有效ASIN则退出
-                    }
-                }
+        // -------- 核心修改：从亚马逊商品链接的a标签提取ASIN --------
+        // 匹配href包含"/dp/"的a标签（亚马逊商品链接）
+        const amazonLink = skuDiv.querySelector('a[href*="/dp/"]');
+        if (amazonLink) {
+            const linkHref = amazonLink.getAttribute('href');
+            // 正则提取/dp/后的10位ASIN码（兼容各种亚马逊链接格式）
+            const asinMatch = linkHref.match(/dp\/([A-Z0-9]{10})/);
+            if (asinMatch && isValidASIN(asinMatch[1])) {
+                asin = asinMatch[1];
+                console.log(`✅ 从链接提取ASIN [${index+1}]：${asin}`);
             }
-
-            // -------- 方式2：备选 - 匹配亚马逊链接中的ASIN --------
-            if (!asin) {
-                const amazonLinks = skuDiv.querySelectorAll('a[href*="/dp/"]');
-                if (amazonLinks.length > 0) {
-                    const linkHref = amazonLinks[0].getAttribute('href');
-                    const asinMatch = linkHref.match(/dp\/([A-Z0-9]{10})/);
-                    if (asinMatch && isValidASIN(asinMatch[1])) {
-                        asin = asinMatch[1];
-                    }
-                }
-            }
-
+        }
             // 仅当ASIN有效时才加入映射和结果列表
             if (asin) {
                 skuMap.set(asin, skuDiv); // 以主值为key，元素为value
