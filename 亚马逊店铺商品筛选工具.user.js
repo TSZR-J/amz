@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         亚马逊店铺商品筛选工具
 // @namespace    amazon-store-filter-multicountry
-// @version      4.8
+// @version      5.0
 // @description  解析URL中的seller编码，多国家销量查询，可视化表格展示筛选结果，支持本地缓存
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
@@ -58,6 +58,8 @@
     let zyPasswordInput = null;
     // 新增：自定义最低价格输入框引用
     let customMinPriceInput = null;
+    // 新增：存储亚马逊页面解析的ASIN-图片/标题映射
+    let asinAmazonInfoMap = {};
 
     let sortConfig = {
         column: null,
@@ -166,6 +168,73 @@
         log(`默认最低售价门槛：${currentSite.defaultMinPrice} ${currentSite.currency}`);
         return currentSite;
     }
+/**
+ * 从亚马逊图片的srcset属性中解析3x分辨率的图片地址
+ * @param {string} srcset - 图片的srcset属性值（如："url1 1x, url2 2x, url3 3x"）
+ * @param {string} fallbackSrc - 备用图片地址（当解析不到3x时使用）
+ * @returns {string} 3x分辨率的图片地址，解析失败则返回备用地址
+ */
+function parseAmazonImage3xUrl(srcset, fallbackSrc = '') {
+    // 空值处理
+    if (!srcset || typeof srcset !== 'string') {
+        return fallbackSrc;
+    }
+
+    // 分割srcset为多个图片项（处理中英文逗号、多余空格）
+    const imageItems = srcset.split(/,+/).map(item => item.trim()).filter(item => item);
+
+    // 定义分辨率优先级（从高到低），同时记录匹配规则
+    const resolutionPriorities = [
+        { name: '3x', pattern: /^(.*?)\s+3x$/i },
+        { name: '2.5x', pattern: /^(.*?)\s+2\.5x$/i },
+        { name: '2x', pattern: /^(.*?)\s+2x$/i },
+        { name: '1.5x', pattern: /^(.*?)\s+1\.5x$/i },
+        { name: '1x', pattern: /^(.*?)\s+1x$/i },
+        { name: '0.5x', pattern: /^(.*?)\s+0\.5x$/i }
+    ];
+
+    // 核心逻辑：先按分辨率优先级遍历，再检查所有图片项
+    for (const priority of resolutionPriorities) {
+        for (const item of imageItems) {
+            const match = item.match(priority.pattern);
+            if (match && match[1]) {
+                return match[1].trim(); // 找到最高优先级的分辨率，直接返回
+            }
+        }
+    }
+
+    // 未找到任何匹配的分辨率，返回备用地址
+    return fallbackSrc;
+}
+    // 修改原有parseAmazonPageInfo函数中的图片解析部分
+function parseAmazonPageInfo(html, asins) {
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    asins.forEach(asin => {
+        // 查找对应ASIN的元素
+        const itemEl = doc.querySelector(`[data-asin="${asin}"]`);
+        if (!itemEl) return;
+
+        // 解析图片（优先3x高清图）
+        const imgEl = itemEl.querySelector('img.s-image, img.a-dynamic-image');
+        if (imgEl) {
+            // 提取3x图片地址
+            const srcset = imgEl.getAttribute('srcset') || '';
+            const src = imgEl.getAttribute('src') || '';
+            const imgUrl = parseAmazonImage3xUrl(srcset, src);
+
+            // 解析标题：优先取h2下span的文本
+            const titleEl = itemEl.querySelector('h2 span');
+            const title = titleEl?.textContent?.trim() || '';
+
+            if (imgUrl || title) {
+                asinAmazonInfoMap[asin] = {
+                    thumb: imgUrl, // 现在存储的是3x高清图
+                    title: title
+                };
+            }
+        }
+    });
+}
 
     // 新增：获取最终使用的最低价格（自定义优先，无则用默认）
     function getFinalMinPrice() {
@@ -176,6 +245,13 @@
             return parseFloat(customValue);
         }
         return currentSite.defaultMinPrice;
+    }
+
+    // 新增：磅转克工具函数（1磅 = 453.59237克）
+    function poundToGram(pound) {
+        if (!pound || isNaN(pound) || pound <= 0) return '0';
+        const gram = pound * 453.59237;
+        return gram.toFixed(0);
     }
 
     function delay(ms) {
@@ -190,7 +266,7 @@
     }
 
     function clearLog() {
-        if (logTextarea) logTextarea.value = '';
+        if (!logTextarea) logTextarea.value = '';
     }
 
     function showCopyToast(msg) {
@@ -364,13 +440,22 @@
         info.appendChild(siteLabel);
         configPanel.appendChild(info);
 
-        // 登录区域
+        // 登录区域 - 调整为两列布局
         const zyAccountContainer = document.createElement('div');
         zyAccountContainer.style.marginBottom = '16px';
         zyAccountContainer.style.padding = '10px';
         zyAccountContainer.style.background = '#f0f9ff';
         zyAccountContainer.style.borderRadius = '8px';
 
+        // 账号密码两列布局容器
+        const accountPwdRow = document.createElement('div');
+        accountPwdRow.style.display = 'flex';
+        accountPwdRow.style.gap = '10px';
+        accountPwdRow.style.marginBottom = '8px';
+
+        // 账号列
+        const accountCol = document.createElement('div');
+        accountCol.style.flex = 1;
         const zyAccountLabel = document.createElement('label');
         zyAccountLabel.textContent = '智赢账号：';
         zyAccountLabel.style.display = 'block';
@@ -387,13 +472,17 @@
         zyAccountInput.style.border = '1px solid #ddd';
         zyAccountInput.style.fontSize = '13px';
         zyAccountInput.placeholder = '请输入智赢账号';
+        accountCol.appendChild(zyAccountLabel);
+        accountCol.appendChild(zyAccountInput);
 
+        // 密码列
+        const passwordCol = document.createElement('div');
+        passwordCol.style.flex = 1;
         const zyPasswordLabel = document.createElement('label');
         zyPasswordLabel.textContent = '智赢密码：';
         zyPasswordLabel.style.display = 'block';
         zyPasswordLabel.style.fontSize = '14px';
         zyPasswordLabel.style.marginBottom = '4px';
-        zyPasswordLabel.style.marginTop = '8px';
         zyPasswordLabel.style.color = '#0369a1';
         zyPasswordInput = document.createElement('input');
         zyPasswordInput.id = 'zyingPasswordInput';
@@ -405,40 +494,45 @@
         zyPasswordInput.style.border = '1px solid #ddd';
         zyPasswordInput.style.fontSize = '13px';
         zyPasswordInput.placeholder = '请输入智赢密码';
+        passwordCol.appendChild(zyPasswordLabel);
+        passwordCol.appendChild(zyPasswordInput);
+
+        accountPwdRow.appendChild(accountCol);
+        accountPwdRow.appendChild(passwordCol);
 
         loginBtn = document.createElement('button');
         loginBtn.id = 'loginZhiyingBtn';
         loginBtn.style.width = '100%';
         loginBtn.style.padding = '8px';
-        loginBtn.style.marginTop = '8px';
         loginBtn.style.border = 'none';
         loginBtn.style.borderRadius = '6px';
         loginBtn.style.fontSize = '14px';
         loginBtn.style.fontWeight = '500';
 
-        zyAccountContainer.appendChild(zyAccountLabel);
-        zyAccountContainer.appendChild(zyAccountInput);
-        zyAccountContainer.appendChild(zyPasswordLabel);
-        zyAccountContainer.appendChild(zyPasswordInput);
+        zyAccountContainer.appendChild(accountPwdRow);
         zyAccountContainer.appendChild(loginBtn);
         configPanel.appendChild(zyAccountContainer);
 
+        // 配置项区域 - 调整为3列，让最低价格和最大并发页数同行
         const items = document.createElement('div');
         items.style.display = 'grid';
+        items.style.gridTemplateColumns = '1fr 1fr 1fr'; // 三列布局
         items.style.gap = '12px';
         items.style.marginBottom = '16px';
+
+        // 配置项分组
         items.appendChild(createItem('查询页数', 'judgePages', 'number', currentConfig.judgePages));
         items.appendChild(createItem('最大跟卖数', 'maxSellerThreshold', 'number', currentConfig.maxSellerThreshold));
         items.appendChild(createItem('最大并发页数', 'maxConcurrentPages', 'number', currentConfig.maxConcurrentPages));
 
-        // 新增：自定义最低价格输入框
+        // 自定义最低价格 - 占前两列，和最大并发页数同行
         const customMinPriceItem = createItem(
             `自定义最低价格 (${currentSite.currency})`,
             'customMinPrice',
             'number',
-            '' // 默认空，使用站点默认值
+            currentSite.defaultMinPrice
         );
-        // 给输入框添加提示说明
+        customMinPriceItem.style.gridColumn = '1 / 3'; // 占前两列，和最大并发页数同行
         const hint = document.createElement('div');
         hint.style.fontSize = '12px';
         hint.style.color = '#6b7280';
@@ -452,6 +546,7 @@
         const btns = document.createElement('div');
         btns.style.display = 'flex';
         btns.style.gap = '10px';
+        btns.style.marginBottom = '12px'; // 进一步缩小间距，让日志框更靠上
 
         const startBtn = document.createElement('button');
         startBtn.id = 'startFilterBtn';
@@ -480,25 +575,37 @@
         btns.appendChild(cancelBtn);
         configPanel.appendChild(btns);
 
+        // 日志区域 - 再增高、再上移
+        const logContainer = document.createElement('div');
+        logContainer.style.marginTop = '0';
+        logContainer.style.flex = 1;
+
         const logTitle = document.createElement('div');
         logTitle.textContent = '日志';
-        logTitle.style.marginTop = '16px';
         logTitle.style.fontSize = '14px';
-        configPanel.appendChild(logTitle);
+        logTitle.style.marginBottom = '6px';
+        logContainer.appendChild(logTitle);
 
         logTextarea = document.createElement('textarea');
         logTextarea.style.width = '100%';
-        logTextarea.style.height = '140px';
-        logTextarea.style.marginTop = '8px';
+        logTextarea.style.height = '260px'; // 从220px再增高到260px
         logTextarea.style.padding = '10px';
         logTextarea.style.borderRadius = '8px';
         logTextarea.style.fontSize = '12px';
-        configPanel.appendChild(logTextarea);
+        logTextarea.style.fontFamily = 'monospace';
+        logTextarea.style.border = '1px solid #ddd';
+        logTextarea.style.resize = 'vertical'; // 允许垂直调整大小
+        logContainer.appendChild(logTextarea);
+        configPanel.appendChild(logContainer);
 
         const resetBtn = document.createElement('button');
         resetBtn.textContent = '重置默认配置';
-        resetBtn.style.marginTop = '10px';
+        resetBtn.style.marginTop = '8px';
         resetBtn.style.padding = '6px 12px';
+        resetBtn.style.border = 'none';
+        resetBtn.style.borderRadius = '6px';
+        resetBtn.style.background = '#e5e7eb';
+        resetBtn.style.cursor = 'pointer';
         resetBtn.onclick = resetConfig;
         configPanel.appendChild(resetBtn);
 
@@ -544,9 +651,9 @@
         document.getElementById('judgePages').value = DEFAULT_CONFIG.judgePages;
         document.getElementById('maxSellerThreshold').value = DEFAULT_CONFIG.maxSellerThreshold;
         document.getElementById('maxConcurrentPages').value = DEFAULT_CONFIG.maxConcurrentPages;
-        // 清空自定义最低价格输入框
+        // 清空自定义最低价格输入框并恢复默认值
         if (customMinPriceInput) {
-            customMinPriceInput.value = '';
+            customMinPriceInput.value = currentSite.defaultMinPrice;
         }
         log('已重置默认配置');
     }
@@ -609,9 +716,10 @@
         thead.style.background = '#f6f7f9';
 
         const tr = document.createElement('tr');
-        const heads = ['ASIN', '图片', '标题', '跟卖数', '价格', '大类排名', '小类排名', '英', '德', '法', '意', '西'];
-        const colWidths = ['80px', '80px', '280px', '70px', '90px', '100px', '100px', '50px', '50px', '50px', '50px', '50px'];
-        const sortableColumns = { 3: 'sellerCount', 4: 'price', 6: 'smallRank', 7: 'sales' };
+        // 需求1：增加重量列
+        const heads = ['ASIN', '图片', '标题', '重量(克)', '跟卖数', '价格', '大类排名', '小类排名', '英', '德', '法', '意', '西'];
+        const colWidths = ['80px', '80px', '280px', '90px', '70px', '90px', '100px', '100px', '50px', '50px', '50px', '50px', '50px'];
+        const sortableColumns = { 4: 'sellerCount', 5: 'price', 7: 'smallRank', 8: 'sales' }; // 调整排序列索引
 
         heads.forEach((h, i) => {
             const th = document.createElement('th');
@@ -731,18 +839,20 @@
         asinTd.style.textOverflow = 'ellipsis';
         row.appendChild(asinTd);
 
+        // 60×60 透明底 + 红色大叉，绝对不会被当成产品图
+        const noImageSvg = `data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cline x1='16' y1='16' x2='44' y2='44' stroke='%23ff4444' stroke-width='5' stroke-linecap='round'/%3E%3Cline x1='44' y1='16' x2='16' y2='44' stroke='%23ff4444' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E`;
         const imgTd = document.createElement('td');
         imgTd.style.padding = '8px';
         imgTd.style.textAlign = 'center';
         const img = document.createElement('img');
-        img.src = p.thumb || 'https://via.placeholder.com/60?text=no+img';
+        img.src = p.thumb || noImageSvg;
         img.style.width = '60px';
         img.style.height = '60px';
         img.style.objectFit = 'cover';
         img.style.borderRadius = '4px';
         img.style.cursor = 'pointer';
         img.onclick = () => showImagePreview(p.thumb);
-        img.onerror = () => { img.src = 'https://via.placeholder.com/60?text=err'; };
+        img.onerror = () => { img.src = noImageSvg; };
         imgTd.appendChild(img);
         row.appendChild(imgTd);
 
@@ -753,7 +863,16 @@
         titleTd.style.overflow = 'hidden';
         titleTd.style.textOverflow = 'ellipsis';
         titleTd.style.padding = '8px';
+        // 需求3：添加title属性，鼠标悬浮显示完整标题
+        titleTd.title = p.title || '无标题';
         row.appendChild(titleTd);
+
+        // 需求1：添加重量列展示
+        const weightTd = document.createElement('td');
+        weightTd.innerText = p.weightGram || '0.00';
+        weightTd.style.padding = '8px';
+        weightTd.style.textAlign = 'center';
+        row.appendChild(weightTd);
 
         const sellerTd = document.createElement('td');
         sellerTd.innerText = p.sellerCount;
@@ -809,7 +928,7 @@
     }
 
     async function fetchPageAsins(storeId, page, retryCount = 0) {
-        const MAX_RETRY = 3;
+        const MAX_RETRY = 5;
         if (abortFlag) return [];
         const url = buildUrl(storeId, page);
         log(`获取第${page}页${retryCount > 0 ? `（重试${retryCount}）` : ''}`);
@@ -821,11 +940,15 @@
                 const a = i.dataset.asin?.trim();
                 if (a) set.add(a);
             });
-            log(`第${page}页：${set.size}个ASIN`);
-            return Array.from(set);
+            const asins = Array.from(set);
+            // 解析当前页面的ASIN对应的图片和标题
+            parseAmazonPageInfo(r.responseText, asins);
+            log(`第${page}页：${asins.length}个ASIN`);
+            return asins;
         } catch (e) {
             if (retryCount < MAX_RETRY) {
-                await delay((retryCount + 1) * 2000);
+                 log(`第${page}页失败：${e.message}`);
+                await delay((retryCount + 1) * 5000);
                 return fetchPageAsins(storeId, page, retryCount + 1);
             } else {
                 log(`第${page}页失败：${e.message}`);
@@ -930,7 +1053,7 @@
         }
     }
 
-    // ========== 核心筛选逻辑（支持自定义最低价格） ==========
+    // ========== 核心筛选逻辑（支持自定义最低价格+图片/标题兜底） ==========
     function processSingleAsin(asin, detailData, salesMap) {
         const d = detailData.data?.[asin] || detailData[asin] || {};
         const offers = d.Offers || [];
@@ -955,10 +1078,19 @@
 
         const si = salesMap.GB?.[asin] || {};
 
+        // 需求1：获取重量并转换单位
+        const packageWeight = d.PackageWeight || 0; // 磅
+        const weightGram = poundToGram(packageWeight); // 转为克，保留2位小数
+
+        // 图片/标题兜底逻辑：先取salesMap，再取亚马逊页面解析的，最后为空
+        const thumb = si.thumb || asinAmazonInfoMap[asin]?.thumb || '';
+        const title = si.title || asinAmazonInfoMap[asin]?.title || '';
+
         const product = {
             asin,
-            title: si.title || '',
-            thumb: si.thumb || '',
+            title: title,
+            thumb: thumb,
+            weightGram, // 新增重量字段
             sellerCount: offers.length,
             minPrice,
             currency,
@@ -1007,7 +1139,7 @@
                 addProductToTable(r.product);
                 productData.push(r.product);
             } else {
-                log(`❌ 不合格 ${asin} | 价格:${r.product.minPrice} | 跟卖:${r.product.sellerCount} | 品牌:${r.product.brandRegistered} | 自FBA:${r.product.isSelfFBA}| 销量:${r.product.sales.GB + r.product.sales.DE + r.product.sales.FR + r.product.sales.IT + r.product.sales.ES}`);
+                log(`❌ 不合格 ${asin} | 价格:${r.product.minPrice} | 跟卖:${r.product.sellerCount} | 品牌:${r.product.brandRegistered} | FBA:${r.product.isSelfFBA}| 销量:${r.product.sales.GB + r.product.sales.DE + r.product.sales.FR + r.product.sales.IT + r.product.sales.ES}`);
             }
         }
     }
@@ -1015,6 +1147,8 @@
     async function fetchPages(storeId, total, maxConcurrent) {
         const all = new Set();
         let page = 1;
+        // 清空ASIN信息映射
+        asinAmazonInfoMap = {};
         while (page <= total && !abortFlag) {
             const tasks = [];
             for (let i = 0; i < maxConcurrent && page <= total; i++) {
