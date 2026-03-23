@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         亚马逊店铺商品筛选工具
 // @namespace    amazon-store-filter-multicountry
-// @version      5.1
+// @version      5.2
 // @description  解析URL中的seller编码，多国家销量查询，可视化表格展示筛选结果，支持本地缓存
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
@@ -112,10 +112,10 @@
     function gmRequest(options) {
         return new Promise((resolve, reject) => {
             const xhr = typeof GM !== 'undefined' && GM.xmlHttpRequest
-                ? GM.xmlHttpRequest
-                : typeof GM_xmlhttpRequest !== 'undefined'
-                    ? GM_xmlhttpRequest
-                    : null;
+            ? GM.xmlHttpRequest
+            : typeof GM_xmlhttpRequest !== 'undefined'
+            ? GM_xmlhttpRequest
+            : null;
 
             if (!xhr) {
                 log('❌ 错误：未找到GM.xmlHttpRequest API');
@@ -133,6 +133,8 @@
                     if (response.status === 429) {
                         log(`❌ 接口限流：${options.url} 返回429错误，终止所有操作`);
                         abortFlag = true;
+                        GM_setValue("zytoken", "");
+                        updateLoginButtonStatus();
                         reject(new Error(`接口限流：${response.status} ${response.statusText}`));
                         return;
                     }
@@ -168,73 +170,73 @@
         log(`默认最低售价门槛：${currentSite.defaultMinPrice} ${currentSite.currency}`);
         return currentSite;
     }
-/**
+    /**
  * 从亚马逊图片的srcset属性中解析3x分辨率的图片地址
  * @param {string} srcset - 图片的srcset属性值（如："url1 1x, url2 2x, url3 3x"）
  * @param {string} fallbackSrc - 备用图片地址（当解析不到3x时使用）
  * @returns {string} 3x分辨率的图片地址，解析失败则返回备用地址
  */
-function parseAmazonImage3xUrl(srcset, fallbackSrc = '') {
-    // 空值处理
-    if (!srcset || typeof srcset !== 'string') {
+    function parseAmazonImage3xUrl(srcset, fallbackSrc = '') {
+        // 空值处理
+        if (!srcset || typeof srcset !== 'string') {
+            return fallbackSrc;
+        }
+
+        // 分割srcset为多个图片项（处理中英文逗号、多余空格）
+        const imageItems = srcset.split(/,+/).map(item => item.trim()).filter(item => item);
+
+        // 定义分辨率优先级（从高到低），同时记录匹配规则
+        const resolutionPriorities = [
+            { name: '3x', pattern: /^(.*?)\s+3x$/i },
+            { name: '2.5x', pattern: /^(.*?)\s+2\.5x$/i },
+            { name: '2x', pattern: /^(.*?)\s+2x$/i },
+            { name: '1.5x', pattern: /^(.*?)\s+1\.5x$/i },
+            { name: '1x', pattern: /^(.*?)\s+1x$/i },
+            { name: '0.5x', pattern: /^(.*?)\s+0\.5x$/i }
+        ];
+
+        // 核心逻辑：先按分辨率优先级遍历，再检查所有图片项
+        for (const priority of resolutionPriorities) {
+            for (const item of imageItems) {
+                const match = item.match(priority.pattern);
+                if (match && match[1]) {
+                    return match[1].trim(); // 找到最高优先级的分辨率，直接返回
+                }
+            }
+        }
+
+        // 未找到任何匹配的分辨率，返回备用地址
         return fallbackSrc;
     }
-
-    // 分割srcset为多个图片项（处理中英文逗号、多余空格）
-    const imageItems = srcset.split(/,+/).map(item => item.trim()).filter(item => item);
-
-    // 定义分辨率优先级（从高到低），同时记录匹配规则
-    const resolutionPriorities = [
-        { name: '3x', pattern: /^(.*?)\s+3x$/i },
-        { name: '2.5x', pattern: /^(.*?)\s+2\.5x$/i },
-        { name: '2x', pattern: /^(.*?)\s+2x$/i },
-        { name: '1.5x', pattern: /^(.*?)\s+1\.5x$/i },
-        { name: '1x', pattern: /^(.*?)\s+1x$/i },
-        { name: '0.5x', pattern: /^(.*?)\s+0\.5x$/i }
-    ];
-
-    // 核心逻辑：先按分辨率优先级遍历，再检查所有图片项
-    for (const priority of resolutionPriorities) {
-        for (const item of imageItems) {
-            const match = item.match(priority.pattern);
-            if (match && match[1]) {
-                return match[1].trim(); // 找到最高优先级的分辨率，直接返回
-            }
-        }
-    }
-
-    // 未找到任何匹配的分辨率，返回备用地址
-    return fallbackSrc;
-}
     // 修改原有parseAmazonPageInfo函数中的图片解析部分
-function parseAmazonPageInfo(html, asins) {
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    asins.forEach(asin => {
-        // 查找对应ASIN的元素
-        const itemEl = doc.querySelector(`[data-asin="${asin}"]`);
-        if (!itemEl) return;
+    function parseAmazonPageInfo(html, asins) {
+        const doc = new DOMParser().parseFromString(html, 'text/html');
+        asins.forEach(asin => {
+            // 查找对应ASIN的元素
+            const itemEl = doc.querySelector(`[data-asin="${asin}"]`);
+            if (!itemEl) return;
 
-        // 解析图片（优先3x高清图）
-        const imgEl = itemEl.querySelector('img.s-image, img.a-dynamic-image');
-        if (imgEl) {
-            // 提取3x图片地址
-            const srcset = imgEl.getAttribute('srcset') || '';
-            const src = imgEl.getAttribute('src') || '';
-            const imgUrl = parseAmazonImage3xUrl(srcset, src);
+            // 解析图片（优先3x高清图）
+            const imgEl = itemEl.querySelector('img.s-image, img.a-dynamic-image');
+            if (imgEl) {
+                // 提取3x图片地址
+                const srcset = imgEl.getAttribute('srcset') || '';
+                const src = imgEl.getAttribute('src') || '';
+                const imgUrl = parseAmazonImage3xUrl(srcset, src);
 
-            // 解析标题：优先取h2下span的文本
-            const titleEl = itemEl.querySelector('h2 span');
-            const title = titleEl?.textContent?.trim() || '';
+                // 解析标题：优先取h2下span的文本
+                const titleEl = itemEl.querySelector('h2 span');
+                const title = titleEl?.textContent?.trim() || '';
 
-            if (imgUrl || title) {
-                asinAmazonInfoMap[asin] = {
-                    thumb: imgUrl, // 现在存储的是3x高清图
-                    title: title
-                };
+                if (imgUrl || title) {
+                    asinAmazonInfoMap[asin] = {
+                        thumb: imgUrl, // 现在存储的是3x高清图
+                        title: title
+                    };
+                }
             }
-        }
-    });
-}
+        });
+    }
 
     // 新增：获取最终使用的最低价格（自定义优先，无则用默认）
     function getFinalMinPrice() {
@@ -947,7 +949,7 @@ function parseAmazonPageInfo(html, asins) {
             return asins;
         } catch (e) {
             if (retryCount < MAX_RETRY) {
-                 log(`第${page}页失败：${e.message}`);
+                log(`第${page}页失败：${e.message}`);
                 await delay((retryCount + 1) * 5000);
                 return fetchPageAsins(storeId, page, retryCount + 1);
             } else {
@@ -1064,9 +1066,9 @@ function parseAmazonPageInfo(html, asins) {
 
         const brandList = d.BrandSourceDetails || [];
         const brandRegistered =
-            brandList.filter(i => ['GB', 'DE', 'FR', 'IT', 'ES'].includes(i.Source) && i.Status === '已注册').length >= 2
-            || brandList.some(i => i.Source === currentSite.code && i.Status === '已注册')
-            || brandList.length > 5;
+              brandList.filter(i => ['GB', 'DE', 'FR', 'IT', 'ES'].includes(i.Source) && i.Status === '已注册').length >= 2
+        || brandList.some(i => i.Source === currentSite.code && i.Status === '已注册')
+        || brandList.length > 5;
 
         const prices = offers.map(o => o.Listing).filter(x => x > 0);
         const minPrice = prices.length ? Math.min(...prices) : 0;
@@ -1112,11 +1114,11 @@ function parseAmazonPageInfo(html, asins) {
         log(`当前筛选门槛：${minPriceThreshold} ${currentSite.currency}`);
 
         const ok =
-            minPrice >= minPriceThreshold
-            && offers.length <= currentConfig.maxSellerThreshold
-            && (product.sales.GB + product.sales.DE + product.sales.FR + product.sales.IT + product.sales.ES) > 0
-            && !isSelfFBA
-            && !brandRegistered;
+              minPrice >= minPriceThreshold
+        && offers.length <= currentConfig.maxSellerThreshold
+        && (product.sales.GB + product.sales.DE + product.sales.FR + product.sales.IT + product.sales.ES) > 0
+        && !isSelfFBA
+        && !brandRegistered;
 
         return { product, isQualified: ok };
     }
