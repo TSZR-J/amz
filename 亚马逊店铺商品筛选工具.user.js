@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         亚马逊店铺商品筛选工具
 // @namespace    amazon-store-filter-multicountry
-// @version      5.4
+// @version      5.5
 // @description  解析URL中的seller编码，多国家销量查询，可视化表格展示筛选结果，支持本地缓存
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
@@ -93,12 +93,14 @@
         }
     }
 
-    // 新增：店铺已选状态相关方法
+    // ========== 【核心修改】店铺已选状态相关方法（按站点+店铺ID存储） ==========
     function getStoreSelectedStatus(storeId) {
-        if (!storeId) return false;
+        if (!storeId || !currentSite) return false;
         try {
-            const selectedStores = JSON.parse(GM_getValue('amz_selected_stores', '[]'));
-            return selectedStores.includes(storeId);
+            // 存储格式改为对象：{ "GB+storeId1": true, "DE+storeId2": true }
+            const selectedStores = JSON.parse(GM_getValue('amz_selected_stores_new', '{}'));
+            const key = `${currentSite.code}${storeId}`; // 生成站点+店铺ID的唯一标识
+            return selectedStores[key] === true;
         } catch (e) {
             log(`读取已选状态失败：${e.message}`);
             return false;
@@ -106,17 +108,16 @@
     }
 
     function setStoreSelectedStatus(storeId, isSelected) {
-        if (!storeId) return;
+        if (!storeId || !currentSite) return;
         try {
-            let selectedStores = JSON.parse(GM_getValue('amz_selected_stores', '[]'));
+            let selectedStores = JSON.parse(GM_getValue('amz_selected_stores_new', '{}'));
+            const key = `${currentSite.code}${storeId}`; // 生成站点+店铺ID的唯一标识
             if (isSelected) {
-                if (!selectedStores.includes(storeId)) {
-                    selectedStores.push(storeId);
-                }
+                selectedStores[key] = true;
             } else {
-                selectedStores = selectedStores.filter(id => id !== storeId);
+                delete selectedStores[key]; // 取消选中时删除对应键
             }
-            GM_setValue('amz_selected_stores', JSON.stringify(selectedStores));
+            GM_setValue('amz_selected_stores_new', JSON.stringify(selectedStores));
             updateMarkSelectedButton(); // 更新按钮状态
         } catch (e) {
             log(`保存已选状态失败：${e.message}`);
@@ -273,33 +274,36 @@
         });
     }
 
-    // 新增：更新标记已选按钮状态
+    // ========== 【核心修改】更新标记已选按钮状态（显示站点+店铺ID） ==========
     function updateMarkSelectedButton() {
-        if (!markSelectedBtn || !storeId) return;
+        if (!markSelectedBtn || !storeId || !currentSite) return;
         const isSelected = getStoreSelectedStatus(storeId);
+        const displayKey = `${currentSite.code}${storeId}`; // 显示站点+店铺ID
+
         if (isSelected) {
             markSelectedBtn.textContent = '✅ 已选';
             markSelectedBtn.style.background = '#10b981';
-            // 更新店铺ID显示，添加已选标识
-            document.getElementById('currentStoreId').innerHTML = `${storeId} <span style="color:#10b981;font-size:12px;">[已选]</span>`;
+            // 更新店铺ID显示，添加站点编码和已选标识
+            document.getElementById('currentStoreId').innerHTML = `${displayKey} <span style="color:#10b981;font-size:12px;">[已选]</span>`;
         } else {
             markSelectedBtn.textContent = '标记已选';
             markSelectedBtn.style.background = '#3b82f6';
-            document.getElementById('currentStoreId').textContent = storeId;
+            document.getElementById('currentStoreId').textContent = displayKey;
         }
     }
 
     // 新增：处理标记已选点击事件
     function handleMarkSelectedClick() {
-        if (!storeId) {
-            showCopyToast('未检测到店铺ID！');
+        if (!storeId || !currentSite) {
+            showCopyToast('未检测到店铺ID或站点信息！');
             return;
         }
         const currentStatus = getStoreSelectedStatus(storeId);
         setStoreSelectedStatus(storeId, !currentStatus);
         const newStatus = !currentStatus;
-        log(`${newStatus ? '标记' : '取消'}店铺${storeId}为已选`);
-        showCopyToast(newStatus ? '已标记为已选' : '已取消已选标记');
+        const displayKey = `${currentSite.code}${storeId}`;
+        log(`${newStatus ? '标记' : '取消'}${displayKey}为已选`);
+        showCopyToast(newStatus ? `已标记${displayKey}为已选` : `已取消${displayKey}的已选标记`);
     }
 
     // 新增：获取最终使用的最低价格（自定义优先，无则用默认）
@@ -1340,7 +1344,9 @@
         storeId = parseStoreIdFromUrl();
         parseCurrentAmazonSite();
         createUI();
-        document.getElementById('currentStoreId').textContent = storeId || '未检测';
+        // 【修改】初始化时显示站点+店铺ID
+        const displayKey = storeId ? `${currentSite.code}${storeId}` : '未检测';
+        document.getElementById('currentStoreId').textContent = displayKey;
         log('初始化完成');
     }
 
