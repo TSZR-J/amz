@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         亚马逊店铺商品筛选工具
 // @namespace    amazon-store-filter-multicountry
-// @version      5.0
+// @version      5.1
 // @description  解析URL中的seller编码，多国家销量查询，可视化表格展示筛选结果，支持本地缓存
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
@@ -1037,7 +1037,7 @@ function parseAmazonPageInfo(html, asins) {
                 timeout: 15000
             });
             const res = JSON.parse(r.responseText);
-            if (res.code === 401) { handleZyLoginExpired(); return {}; }
+            if (res.code === 401||res.code === 429) { handleZyLoginExpired(); return {}; }
             return res;
         } catch (e) {
             if (e.message.includes('401')) { handleZyLoginExpired(); }
