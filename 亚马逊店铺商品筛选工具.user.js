@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         亚马逊店铺商品筛选工具
 // @namespace    amazon-store-filter-multicountry
-// @version      5.2
+// @version      5.4
 // @description  解析URL中的seller编码，多国家销量查询，可视化表格展示筛选结果，支持本地缓存
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
@@ -39,7 +39,8 @@
     const DEFAULT_CONFIG = {
         judgePages: 10,          // 跟卖只扫前5页足够
         maxSellerThreshold: 6,   // 最大跟卖人数
-        maxConcurrentPages: 5
+        maxConcurrentPages: 5,
+        includeSelfFBA: true     // 新增：默认包含FBA商品
     };
 
     // ========== 全局变量 ==========
@@ -60,6 +61,10 @@
     let customMinPriceInput = null;
     // 新增：存储亚马逊页面解析的ASIN-图片/标题映射
     let asinAmazonInfoMap = {};
+    // 新增：FBA筛选配置复选框引用
+    let includeSelfFBACheckbox = null;
+    // 新增：标记已选按钮引用
+    let markSelectedBtn = null;
 
     let sortConfig = {
         column: null,
@@ -85,6 +90,36 @@
             log(`已保存${data.length}条数据到本地缓存`);
         } catch (e) {
             log(`保存缓存失败：${e.message}`);
+        }
+    }
+
+    // 新增：店铺已选状态相关方法
+    function getStoreSelectedStatus(storeId) {
+        if (!storeId) return false;
+        try {
+            const selectedStores = JSON.parse(GM_getValue('amz_selected_stores', '[]'));
+            return selectedStores.includes(storeId);
+        } catch (e) {
+            log(`读取已选状态失败：${e.message}`);
+            return false;
+        }
+    }
+
+    function setStoreSelectedStatus(storeId, isSelected) {
+        if (!storeId) return;
+        try {
+            let selectedStores = JSON.parse(GM_getValue('amz_selected_stores', '[]'));
+            if (isSelected) {
+                if (!selectedStores.includes(storeId)) {
+                    selectedStores.push(storeId);
+                }
+            } else {
+                selectedStores = selectedStores.filter(id => id !== storeId);
+            }
+            GM_setValue('amz_selected_stores', JSON.stringify(selectedStores));
+            updateMarkSelectedButton(); // 更新按钮状态
+        } catch (e) {
+            log(`保存已选状态失败：${e.message}`);
         }
     }
 
@@ -131,7 +166,7 @@
                 timeout: options.timeout || 10000,
                 onload: function (response) {
                     if (response.status === 429) {
-                        log(`❌ 接口限流：${options.url} 返回429错误，终止所有操作`);
+                        log(`❌ 接口限流：${options.url} 返回429错误，终止所有操作，请重新点击登录`);
                         abortFlag = true;
                         GM_setValue("zytoken", "");
                         updateLoginButtonStatus();
@@ -236,6 +271,35 @@
                 }
             }
         });
+    }
+
+    // 新增：更新标记已选按钮状态
+    function updateMarkSelectedButton() {
+        if (!markSelectedBtn || !storeId) return;
+        const isSelected = getStoreSelectedStatus(storeId);
+        if (isSelected) {
+            markSelectedBtn.textContent = '✅ 已选';
+            markSelectedBtn.style.background = '#10b981';
+            // 更新店铺ID显示，添加已选标识
+            document.getElementById('currentStoreId').innerHTML = `${storeId} <span style="color:#10b981;font-size:12px;">[已选]</span>`;
+        } else {
+            markSelectedBtn.textContent = '标记已选';
+            markSelectedBtn.style.background = '#3b82f6';
+            document.getElementById('currentStoreId').textContent = storeId;
+        }
+    }
+
+    // 新增：处理标记已选点击事件
+    function handleMarkSelectedClick() {
+        if (!storeId) {
+            showCopyToast('未检测到店铺ID！');
+            return;
+        }
+        const currentStatus = getStoreSelectedStatus(storeId);
+        setStoreSelectedStatus(storeId, !currentStatus);
+        const newStatus = !currentStatus;
+        log(`${newStatus ? '标记' : '取消'}店铺${storeId}为已选`);
+        showCopyToast(newStatus ? '已标记为已选' : '已取消已选标记');
     }
 
     // 新增：获取最终使用的最低价格（自定义优先，无则用默认）
@@ -430,6 +494,20 @@
         storeLabel.appendChild(storeVal);
         info.appendChild(storeLabel);
 
+        // 新增：标记已选按钮
+        markSelectedBtn = document.createElement('button');
+        markSelectedBtn.id = 'markSelectedBtn';
+        markSelectedBtn.style.marginTop = '8px';
+        markSelectedBtn.style.padding = '6px 12px';
+        markSelectedBtn.style.border = 'none';
+        markSelectedBtn.style.borderRadius = '6px';
+        markSelectedBtn.style.background = '#3b82f6';
+        markSelectedBtn.style.color = 'white';
+        markSelectedBtn.style.fontSize = '12px';
+        markSelectedBtn.style.cursor = 'pointer';
+        markSelectedBtn.onclick = handleMarkSelectedClick;
+        info.appendChild(markSelectedBtn);
+
         const siteLabel = document.createElement('div');
         siteLabel.style.fontSize = '14px';
         siteLabel.style.marginTop = '4px';
@@ -543,6 +621,33 @@
         customMinPriceItem.appendChild(hint);
         items.appendChild(customMinPriceItem);
 
+        // 新增：FBA筛选配置项
+        const includeSelfFBAItem = document.createElement('div');
+        includeSelfFBAItem.style.gridColumn = '3 / 4'; // 占第三列
+        const includeSelfFBALabel = document.createElement('label');
+        includeSelfFBALabel.textContent = '包含FBA';
+        includeSelfFBALabel.style.display = 'block';
+        includeSelfFBALabel.style.fontSize = '14px';
+        includeSelfFBALabel.style.marginBottom = '4px';
+        includeSelfFBACheckbox = document.createElement('input');
+        includeSelfFBACheckbox.id = 'includeSelfFBA';
+        includeSelfFBACheckbox.type = 'checkbox';
+        includeSelfFBACheckbox.checked = currentConfig.includeSelfFBA;
+        includeSelfFBACheckbox.style.width = 'auto';
+        includeSelfFBACheckbox.style.marginRight = '8px';
+        // 绑定复选框变更事件
+        includeSelfFBACheckbox.addEventListener('change', function() {
+            currentConfig.includeSelfFBA = this.checked;
+            log(`已${this.checked ? '启用' : '禁用'}包含FBA商品筛选`);
+        });
+        const checkboxWrapper = document.createElement('div');
+        checkboxWrapper.style.display = 'flex';
+        checkboxWrapper.style.alignItems = 'center';
+        checkboxWrapper.appendChild(includeSelfFBACheckbox);
+        checkboxWrapper.appendChild(includeSelfFBALabel);
+        includeSelfFBAItem.appendChild(checkboxWrapper);
+        items.appendChild(includeSelfFBAItem);
+
         configPanel.appendChild(items);
 
         const btns = document.createElement('div');
@@ -616,9 +721,13 @@
         createImagePreviewModal();
         updateLoginButtonStatus();
         loadCacheToTable();
+        // 新增：更新标记已选按钮状态
+        updateMarkSelectedButton();
 
         // 绑定自定义最低价格输入框引用
         customMinPriceInput = document.getElementById('customMinPrice');
+        // 绑定FBA筛选复选框引用
+        includeSelfFBACheckbox = document.getElementById('includeSelfFBA');
     }
 
     function createItem(label, id, type, val) {
@@ -656,6 +765,11 @@
         // 清空自定义最低价格输入框并恢复默认值
         if (customMinPriceInput) {
             customMinPriceInput.value = currentSite.defaultMinPrice;
+        }
+        // 重置FBA筛选复选框
+        if (includeSelfFBACheckbox) {
+            includeSelfFBACheckbox.checked = DEFAULT_CONFIG.includeSelfFBA;
+            currentConfig.includeSelfFBA = DEFAULT_CONFIG.includeSelfFBA;
         }
         log('已重置默认配置');
     }
@@ -1113,11 +1227,14 @@
         const minPriceThreshold = getFinalMinPrice();
         log(`当前筛选门槛：${minPriceThreshold} ${currentSite.currency}`);
 
+        // 修改：根据配置决定是否包含FBA商品
+        const fbaCondition = currentConfig.includeSelfFBA ? true : !product.isSelfFBA;
+
         const ok =
               minPrice >= minPriceThreshold
         && offers.length <= currentConfig.maxSellerThreshold
         && (product.sales.GB + product.sales.DE + product.sales.FR + product.sales.IT + product.sales.ES) > 0
-        && !isSelfFBA
+        && fbaCondition  // 使用配置的FBA筛选条件
         && !brandRegistered;
 
         return { product, isQualified: ok };
@@ -1179,10 +1296,13 @@
         currentConfig.judgePages = +document.getElementById('judgePages').value || 5;
         currentConfig.maxSellerThreshold = +document.getElementById('maxSellerThreshold').value || 6;
         currentConfig.maxConcurrentPages = +document.getElementById('maxConcurrentPages').value || 3;
+        // 读取FBA筛选配置
+        currentConfig.includeSelfFBA = includeSelfFBACheckbox?.checked || DEFAULT_CONFIG.includeSelfFBA;
 
         // 打印当前使用的最低价格
         const finalMinPrice = getFinalMinPrice();
         log(`本次筛选最低价格门槛：${finalMinPrice} ${currentSite.currency}`);
+        log(`本次筛选FBA配置：${currentConfig.includeSelfFBA ? '包含FBA' : '排除FBA'}`);
 
         isRunning = true;
         abortFlag = false;
