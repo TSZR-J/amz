@@ -22,10 +22,8 @@
 // @connect      www.amazon.it
 // @require      https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js
 // ==/UserScript==
-
 (function () {
     'use strict';
-
     // ========== 亚马逊站点配置 ==========
     const amazonSites = [
         { add: "https://www.amazon.it/dp/", name: "意大利(IT)", code: "IT", domain: "amazon.it", defaultMinPrice: 11, currency: "EUR" },
@@ -34,7 +32,6 @@
         { add: "https://www.amazon.de/dp/", name: "德国(DE)", code: "DE", domain: "amazon.de", defaultMinPrice: 11, currency: "EUR" },
         { add: "https://www.amazon.es/dp/", name: "西班牙(ES)", code: "ES", domain: "amazon.es", defaultMinPrice: 10, currency: "EUR" }
     ];
-
     // ========== 默认配置 ==========
     const DEFAULT_CONFIG = {
         judgePages: 10,          // 跟卖只扫前5页足够
@@ -58,7 +55,6 @@
         const [id] = item.split(';');
         if(id) blacklistedSellers.add(id.trim().toLowerCase());
     });
-
     // ========== 全局变量 ==========
     let isRunning = false;
     let abortFlag = false;
@@ -77,12 +73,10 @@
     let asinAmazonInfoMap = {};
     let includeSelfFBACheckbox = null;
     let markSelectedBtn = null;
-
     let sortConfig = {
         column: null,
         direction: 'asc'
     };
-
     // ========== 缓存 ==========
     function getStoreCache(storeId) {
         if (!storeId) return [];
@@ -94,7 +88,6 @@
             return [];
         }
     }
-
     function saveStoreCache(storeId, data) {
         if (!storeId || !Array.isArray(data)) return;
         try {
@@ -104,7 +97,6 @@
             log(`保存缓存失败：${e.message}`);
         }
     }
-
     // ========== 【核心修改】店铺已选状态相关方法（按站点+店铺ID存储） ==========
     function getStoreSelectedStatus(storeId) {
         if (!storeId || !currentSite) return false;
@@ -117,7 +109,6 @@
             return false;
         }
     }
-
     function setStoreSelectedStatus(storeId, isSelected) {
         if (!storeId || !currentSite) return;
         try {
@@ -134,7 +125,6 @@
             log(`保存已选状态失败：${e.message}`);
         }
     }
-
     function clearStoreCache(storeId) {
         if (!storeId) return;
         GM_setValue(`amz_filter_${storeId}`, '[]');
@@ -143,7 +133,6 @@
         log(`已清空店铺${storeId}的缓存数据`);
         showCopyToast("已清空缓存，标记为筛选完成");
     }
-
     function loadCacheToTable() {
         if (!storeId) return;
         const cacheData = getStoreCache(storeId);
@@ -154,7 +143,6 @@
             log(`从缓存加载了${cacheData.length}条合格产品数据`);
         }
     }
-
     // ========== GM 请求 ==========
     function gmRequest(options) {
         return new Promise((resolve, reject) => {
@@ -163,13 +151,11 @@
             : typeof GM_xmlhttpRequest !== 'undefined'
             ? GM_xmlhttpRequest
             : null;
-
             if (!xhr) {
                 log('❌ 错误：未找到GM.xmlHttpRequest API');
                 reject(new Error('GM.xmlHttpRequest is not available'));
                 return;
             }
-
             // ===================== 【修复 503】核心：强制添加浏览器请求头 =====================
             const isAmazonRequest = options.url && (
                 options.url.includes('amazon.co.uk') ||
@@ -178,7 +164,6 @@
                 options.url.includes('amazon.es') ||
                 options.url.includes('amazon.it')
             );
-
             // 标准浏览器请求头（伪装成真实Chrome访问）
             const defaultHeaders = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
@@ -192,7 +177,6 @@
                 'Sec-Fetch-User': '?1',
                 'Cache-Control': 'max-age=0',
             };
-
             // 亚马逊请求：强制使用浏览器头 + 携带当前页面Cookie
             const finalHeaders = { ...defaultHeaders };
             if (isAmazonRequest) {
@@ -200,11 +184,9 @@
                 finalHeaders['Cookie'] = document.cookie;
                 finalHeaders['Referer'] = window.location.href;
             }
-
             // 合并用户自定义请求头
             const mergedHeaders = { ...finalHeaders, ...(options.headers || {}) };
             // ==================================================================================
-
             xhr({
                 method: options.method || 'GET',
                 url: options.url,
@@ -213,10 +195,7 @@
                 timeout: options.timeout || 15000, // 延长超时
                 onload: function (response) {
                     if (response.status === 429) {
-                        log(`❌ 接口限流：${options.url} 返回429错误，终止所有操作，请重新点击登录`);
-                        abortFlag = true;
-                        GM_setValue("zytoken", "");
-                        updateLoginButtonStatus();
+                        log(`⚠️ 接口限流：${options.url} 返回429错误，准备自动重新登录并重试`);
                         reject(new Error(`接口限流：${response.status} ${response.statusText}`));
                         return;
                     }
@@ -233,7 +212,32 @@
             });
         });
     }
-
+    // ========== 【新增核心】429自动重登并重试通用方法 ==========
+    async function retryOn429(fn, maxRetry = 2) {
+        let retryCount = 0;
+        while (retryCount < maxRetry) {
+            try {
+                return await fn();
+            } catch (e) {
+                if (e.message.includes('429') && retryCount < maxRetry - 1) {
+                    retryCount++;
+                    log(`🔄 第${retryCount}次重试：429限流，自动重新登录智赢`);
+                    // 自动重新登录（使用缓存的账号密码）
+                    const account = getZyAccount();
+                    const password = getZyPassword();
+                    if (!account || !password) {
+                        throw new Error('无缓存账号密码，无法自动重登');
+                    }
+                    await zyLogin(account, password); // 重登刷新token
+                    log(`✅ 自动重登成功，继续重试请求`);
+                    await delay(3000); // 重登后延迟3s再重试，避免再次限流
+                } else {
+                    throw e; // 非429/重试耗尽，抛出原错误
+                }
+            }
+        }
+        throw new Error(`429限流，自动重登${maxRetry-1}次后仍失败`);
+    }
     // ========== 工具 ==========
     function parseStoreIdFromUrl() {
         const urlParams = new URLSearchParams(window.location.search);
@@ -249,7 +253,6 @@
         }
         return sellerId || '';
     }
-
     function parseCurrentAmazonSite() {
         const host = window.location.hostname;
         const s = amazonSites.find(s => host.includes(s.domain));
@@ -258,12 +261,10 @@
         log(`默认最低售价门槛：${currentSite.defaultMinPrice} ${currentSite.currency}`);
         return currentSite;
     }
-
     function parseAmazonImage3xUrl(srcset, fallbackSrc = '') {
         if (!srcset || typeof srcset !== 'string') {
             return fallbackSrc;
         }
-
         const imageItems = srcset.split(/,+/).map(item => item.trim()).filter(item => item);
         const resolutionPriorities = [
             { name: '3x', pattern: /^(.*?)\s+3x$/i },
@@ -273,7 +274,6 @@
             { name: '1x', pattern: /^(.*?)\s+1x$/i },
             { name: '0.5x', pattern: /^(.*?)\s+0\.5x$/i }
         ];
-
         for (const priority of resolutionPriorities) {
             for (const item of imageItems) {
                 const match = item.match(priority.pattern);
@@ -284,22 +284,18 @@
         }
         return fallbackSrc;
     }
-
     function parseAmazonPageInfo(html, asins) {
         const doc = new DOMParser().parseFromString(html, 'text/html');
         asins.forEach(asin => {
             const itemEl = doc.querySelector(`[data-asin="${asin}"]`);
             if (!itemEl) return;
-
             const imgEl = itemEl.querySelector('img.s-image, img.a-dynamic-image');
             if (imgEl) {
                 const srcset = imgEl.getAttribute('srcset') || '';
                 const src = imgEl.getAttribute('src') || '';
                 const imgUrl = parseAmazonImage3xUrl(srcset, src);
-
                 const titleEl = itemEl.querySelector('h2 span');
                 const title = titleEl?.textContent?.trim() || '';
-
                 if (imgUrl || title) {
                     asinAmazonInfoMap[asin] = {
                         thumb: imgUrl,
@@ -309,13 +305,11 @@
             }
         });
     }
-
     // ========== 【核心修改】更新标记已选按钮状态（显示站点+店铺ID） ==========
     function updateMarkSelectedButton() {
         if (!markSelectedBtn || !storeId || !currentSite) return;
         const isSelected = getStoreSelectedStatus(storeId);
         const displayKey = `${currentSite.code}${storeId}`;
-
         if (isSelected) {
             markSelectedBtn.textContent = '✅ 已选';
             markSelectedBtn.style.background = '#10b981';
@@ -326,7 +320,6 @@
             document.getElementById('currentStoreId').textContent = displayKey;
         }
     }
-
     function handleMarkSelectedClick() {
         if (!storeId || !currentSite) {
             showCopyToast('未检测到店铺ID或站点信息！');
@@ -339,7 +332,6 @@
         log(`${newStatus ? '标记' : '取消'}${displayKey}为已选`);
         showCopyToast(newStatus ? `已标记${displayKey}为已选` : `已取消${displayKey}的已选标记`);
     }
-
     function getFinalMinPrice() {
         const customValue = customMinPriceInput?.value?.trim();
         if (customValue && !isNaN(customValue) && parseFloat(customValue) > 0) {
@@ -347,28 +339,23 @@
         }
         return currentSite.defaultMinPrice;
     }
-
     function poundToGram(pound) {
         if (!pound || isNaN(pound) || pound <= 0) return '0';
         const gram = pound * 453.59237;
         return gram.toFixed(0);
     }
-
     function delay(ms) {
         return new Promise(r => setTimeout(r, ms));
     }
-
     function log(msg) {
         if (!logTextarea) return;
         const t = new Date().toLocaleTimeString();
         logTextarea.value += `[${t}] ${msg}\n`;
         logTextarea.scrollTop = logTextarea.scrollHeight;
     }
-
     function clearLog() {
         if (!logTextarea) logTextarea.value = '';
     }
-
     function showCopyToast(msg) {
         const toast = document.createElement('div');
         toast.style.cssText = `
@@ -382,7 +369,6 @@
             toast.remove();
         }, 2000);
     }
-
     // ========== 登录 ==========
     function getZyToken() {
         return GM_getValue("zytoken", "").trim();
@@ -395,7 +381,6 @@
     function getZyAccount() { return GM_getValue("zy_account", ""); }
     function getZyPassword() { return GM_getValue("zy_password", ""); }
     function isZyLoggedIn() { return !!getZyToken(); }
-
     function updateLoginButtonStatus() {
         if (!loginBtn) return;
         if (isZyLoggedIn()) {
@@ -412,15 +397,13 @@
             loginBtn.onclick = handleLoginClick;
         }
     }
-
+    // 【修改】移除429时的abortFlag=true，仅清空token
     function handleZyLoginExpired() {
         GM_setValue("zytoken", "");
-        abortFlag = true;
-        log('❌ 智赢登录失效，请重新登录！');
-        showCopyToast("智赢登录失效，请重新登录！");
+        log('❌ 智赢登录失效，准备自动重登');
+        showCopyToast("智赢登录失效，自动重登中...");
         updateLoginButtonStatus();
     }
-
     async function handleLoginClick() {
         const account = zyAccountInput.value.trim();
         const password = zyPasswordInput.value.trim();
@@ -438,7 +421,6 @@
             updateLoginButtonStatus();
         }
     }
-
     async function zyLogin(account, password) {
         const token = getZyToken() || '';
         const ts = String(Math.floor(Date.now() / 1000));
@@ -446,7 +428,6 @@
         const path = "/api/authv2/Login";
         const signStr = data + "POST" + path + ts + token + "v1";
         const sign = CryptoJS.HmacSHA256(signStr, "https://seller.zying.net").toString(CryptoJS.enc.Hex);
-
         try {
             const r = await gmRequest({
                 method: 'POST',
@@ -481,7 +462,6 @@
             throw e;
         }
     }
-
     // ========== UI ==========
     function createUI() {
         const floatBtn = document.createElement('div');
@@ -495,7 +475,6 @@
         floatBtn.textContent = '🔍';
         floatBtn.onclick = togglePanels;
         document.body.appendChild(floatBtn);
-
         const configPanel = document.createElement('div');
         configPanel.id = 'filterConfigPanel';
         configPanel.style.cssText = `
@@ -503,7 +482,6 @@
             border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.15);
             padding:20px;font-family:system-ui;z-index:999998;display:none;
         `;
-
         const title = document.createElement('h3');
         title.textContent = '店铺商品筛选配置';
         title.style.margin = '0 0 16px 0';
@@ -511,13 +489,11 @@
         title.style.borderBottom = '1px solid #f0f0f0';
         title.style.paddingBottom = '12px';
         configPanel.appendChild(title);
-
         const info = document.createElement('div');
         info.style.marginBottom = '16px';
         info.style.padding = '10px';
         info.style.background = '#f9fafb';
         info.style.borderRadius = '8px';
-
         const storeLabel = document.createElement('div');
         storeLabel.style.fontSize = '14px';
         storeLabel.textContent = '当前店铺：';
@@ -527,7 +503,6 @@
         storeVal.textContent = storeId || '未检测';
         storeLabel.appendChild(storeVal);
         info.appendChild(storeLabel);
-
         markSelectedBtn = document.createElement('button');
         markSelectedBtn.id = 'markSelectedBtn';
         markSelectedBtn.style.marginTop = '8px';
@@ -540,7 +515,6 @@
         markSelectedBtn.style.cursor = 'pointer';
         markSelectedBtn.onclick = handleMarkSelectedClick;
         info.appendChild(markSelectedBtn);
-
         const siteLabel = document.createElement('div');
         siteLabel.style.fontSize = '14px';
         siteLabel.style.marginTop = '4px';
@@ -552,18 +526,15 @@
         siteLabel.appendChild(siteVal);
         info.appendChild(siteLabel);
         configPanel.appendChild(info);
-
         const zyAccountContainer = document.createElement('div');
         zyAccountContainer.style.marginBottom = '16px';
         zyAccountContainer.style.padding = '10px';
         zyAccountContainer.style.background = '#f0f9ff';
         zyAccountContainer.style.borderRadius = '8px';
-
         const accountPwdRow = document.createElement('div');
         accountPwdRow.style.display = 'flex';
         accountPwdRow.style.gap = '10px';
         accountPwdRow.style.marginBottom = '8px';
-
         const accountCol = document.createElement('div');
         accountCol.style.flex = 1;
         const zyAccountLabel = document.createElement('label');
@@ -584,7 +555,6 @@
         zyAccountInput.placeholder = '请输入智赢账号';
         accountCol.appendChild(zyAccountLabel);
         accountCol.appendChild(zyAccountInput);
-
         const passwordCol = document.createElement('div');
         passwordCol.style.flex = 1;
         const zyPasswordLabel = document.createElement('label');
@@ -605,10 +575,8 @@
         zyPasswordInput.placeholder = '请输入智赢密码';
         passwordCol.appendChild(zyPasswordLabel);
         passwordCol.appendChild(zyPasswordInput);
-
         accountPwdRow.appendChild(accountCol);
         accountPwdRow.appendChild(passwordCol);
-
         loginBtn = document.createElement('button');
         loginBtn.id = 'loginZhiyingBtn';
         loginBtn.style.width = '100%';
@@ -617,21 +585,17 @@
         loginBtn.style.borderRadius = '6px';
         loginBtn.style.fontSize = '14px';
         loginBtn.style.fontWeight = '500';
-
         zyAccountContainer.appendChild(accountPwdRow);
         zyAccountContainer.appendChild(loginBtn);
         configPanel.appendChild(zyAccountContainer);
-
         const items = document.createElement('div');
         items.style.display = 'grid';
         items.style.gridTemplateColumns = '1fr 1fr 1fr';
         items.style.gap = '12px';
         items.style.marginBottom = '16px';
-
         items.appendChild(createItem('查询页数', 'judgePages', 'number', currentConfig.judgePages));
         items.appendChild(createItem('最大跟卖数', 'maxSellerThreshold', 'number', currentConfig.maxSellerThreshold));
         items.appendChild(createItem('最大并发页数', 'maxConcurrentPages', 'number', currentConfig.maxConcurrentPages));
-
         const customMinPriceItem = createItem(
             `自定义最低价格 (${currentSite.currency})`,
             'customMinPrice',
@@ -646,7 +610,6 @@
         hint.textContent = `留空则使用默认值：${currentSite.defaultMinPrice} ${currentSite.currency}`;
         customMinPriceItem.appendChild(hint);
         items.appendChild(customMinPriceItem);
-
         const includeSelfFBAItem = document.createElement('div');
         includeSelfFBAItem.style.gridColumn = '3 / 4';
         const includeSelfFBALabel = document.createElement('label');
@@ -671,14 +634,11 @@
         checkboxWrapper.appendChild(includeSelfFBALabel);
         includeSelfFBAItem.appendChild(checkboxWrapper);
         items.appendChild(includeSelfFBAItem);
-
         configPanel.appendChild(items);
-
         const btns = document.createElement('div');
         btns.style.display = 'flex';
         btns.style.gap = '10px';
         btns.style.marginBottom = '12px';
-
         const startBtn = document.createElement('button');
         startBtn.id = 'startFilterBtn';
         startBtn.textContent = '开始筛选';
@@ -690,7 +650,6 @@
         startBtn.style.borderRadius = '8px';
         startBtn.onclick = startBatchFilter;
         if (!storeId) startBtn.disabled = true;
-
         const cancelBtn = document.createElement('button');
         cancelBtn.id = 'cancelFilterBtn';
         cancelBtn.textContent = '取消';
@@ -701,21 +660,17 @@
         cancelBtn.style.borderRadius = '8px';
         cancelBtn.style.display = 'none';
         cancelBtn.onclick = cancelFilter;
-
         btns.appendChild(startBtn);
         btns.appendChild(cancelBtn);
         configPanel.appendChild(btns);
-
         const logContainer = document.createElement('div');
         logContainer.style.marginTop = '0';
         logContainer.style.flex = 1;
-
         const logTitle = document.createElement('div');
         logTitle.textContent = '日志';
         logTitle.style.fontSize = '14px';
         logTitle.style.marginBottom = '6px';
         logContainer.appendChild(logTitle);
-
         logTextarea = document.createElement('textarea');
         logTextarea.style.width = '100%';
         logTextarea.style.height = '260px';
@@ -727,7 +682,6 @@
         logTextarea.style.resize = 'vertical';
         logContainer.appendChild(logTextarea);
         configPanel.appendChild(logContainer);
-
         const resetBtn = document.createElement('button');
         resetBtn.textContent = '重置默认配置';
         resetBtn.style.marginTop = '8px';
@@ -738,18 +692,15 @@
         resetBtn.style.cursor = 'pointer';
         resetBtn.onclick = resetConfig;
         configPanel.appendChild(resetBtn);
-
         document.body.appendChild(configPanel);
         createProductTable();
         createImagePreviewModal();
         updateLoginButtonStatus();
         loadCacheToTable();
         updateMarkSelectedButton();
-
         customMinPriceInput = document.getElementById('customMinPrice');
         includeSelfFBACheckbox = document.getElementById('includeSelfFBA');
     }
-
     function createItem(label, id, type, val) {
         const d = document.createElement('div');
         const l = document.createElement('label');
@@ -769,7 +720,6 @@
         d.appendChild(i);
         return d;
     }
-
     function togglePanels() {
         const cfg = document.getElementById('filterConfigPanel');
         const tab = document.getElementById('productTableContainer');
@@ -777,7 +727,6 @@
         cfg.style.display = show ? 'block' : 'none';
         tab.style.display = show ? 'flex' : 'none';
     }
-
     function resetConfig() {
         document.getElementById('judgePages').value = DEFAULT_CONFIG.judgePages;
         document.getElementById('maxSellerThreshold').value = DEFAULT_CONFIG.maxSellerThreshold;
@@ -791,7 +740,6 @@
         }
         log('已重置默认配置');
     }
-
     // ========== 表格 ==========
     function createProductTable() {
         const c = document.createElement('div');
@@ -801,17 +749,14 @@
             background:#fff;border-radius:12px;box-shadow:0 8px 24px rgba(0,0,0,0.12);
             padding:20px;z-index:999997;display:none;flex-direction:column;overflow:hidden;
         `;
-
         const bar = document.createElement('div');
         bar.style.display = 'flex';
         bar.style.justifyContent = 'space-between';
         bar.style.alignItems = 'center';
         bar.style.marginBottom = '16px';
-
         const t = document.createElement('h3');
         t.textContent = '合格商品列表';
         t.style.margin = 0;
-
         const clearCacheBtn = document.createElement('button');
         clearCacheBtn.id = 'clearCacheBtn';
         clearCacheBtn.textContent = '清空缓存';
@@ -826,29 +771,24 @@
                 clearStoreCache(storeId);
             }
         };
-
         bar.appendChild(t);
         bar.appendChild(clearCacheBtn);
         c.appendChild(bar);
-
         const tableWrap = document.createElement('div');
         tableWrap.style.flex = 1;
         tableWrap.style.overflow = 'auto';
         tableWrap.style.border = '1px solid #eee';
         tableWrap.style.borderRadius = '8px';
-
         productTable = document.createElement('table');
         productTable.style.width = '100%';
         productTable.style.borderCollapse = 'collapse';
         productTable.style.fontSize = '13px';
         productTable.style.tableLayout = 'fixed';
-
         const thead = document.createElement('thead');
         thead.style.position = 'sticky';
         thead.style.top = '0';
         thead.style.zIndex = '10';
         thead.style.background = '#f6f7f9';
-
         const tr = document.createElement('tr');
         // 1. 新增上架日期 2. 删除大类排名 3. 所有国家列支持排序
         const heads = ['ASIN', '图片', '标题', '上架日期', '重量(克)', '跟卖数', '价格', '小类排名', '英', '德', '法', '意', '西'];
@@ -864,7 +804,6 @@
             11: 'sales_IT',      // 意大利
             12: 'sales_ES'       // 西班牙
         };
-
         heads.forEach((h, i) => {
             const th = document.createElement('th');
             th.textContent = h;
@@ -895,7 +834,6 @@
         });
         thead.appendChild(tr);
         productTable.appendChild(thead);
-
         const tbody = document.createElement('tbody');
         tbody.id = 'productTableBody';
         productTable.appendChild(tbody);
@@ -903,7 +841,6 @@
         c.appendChild(tableWrap);
         document.body.appendChild(c);
     }
-
     // 修复：销量统一转数字排序，所有国家列独立排序
     function sortByColumn(column) {
         if (productData.length === 0) return;
@@ -915,7 +852,6 @@
         }
         const sorted = [...productData];
         const dir = sortConfig.direction === 'asc' ? 1 : -1;
-
         switch (column) {
             case 'firstDate':
                 sorted.sort((a, b) => {
@@ -958,7 +894,6 @@
         sorted.forEach(p => addProductToTable(p));
         log(`已按${sortConfig.column}${sortConfig.direction === 'asc' ? '升序' : '降序'}排序`);
     }
-
     function createImagePreviewModal() {
         const m = document.createElement('div');
         m.id = 'imagePreviewModal';
@@ -980,20 +915,17 @@
         document.body.appendChild(m);
         imagePreviewModal = m;
     }
-
     function showImagePreview(src) {
         if (!src) return;
         const img = document.getElementById('previewImage');
         img.src = src;
         document.getElementById('imagePreviewModal').style.display = 'flex';
     }
-
     // 表格渲染：新增上架日期列，删除大类排名
     function addProductToTable(p) {
         const tbody = document.getElementById('productTableBody');
         const row = document.createElement('tr');
         row.style.borderBottom = '1px solid #eee';
-
         const asinTd = document.createElement('td');
         asinTd.innerText = p.asin;
         asinTd.style.padding = '8px';
@@ -1001,7 +933,6 @@
         asinTd.style.overflow = 'hidden';
         asinTd.style.textOverflow = 'ellipsis';
         row.appendChild(asinTd);
-
         const noImageSvg = `data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='60' height='60'%3E%3Cline x1='16' y1='16' x2='44' y2='44' stroke='%23ff4444' stroke-width='5' stroke-linecap='round'/%3E%3Cline x1='44' y1='16' x2='16' y2='44' stroke='%23ff4444' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E`;
         const imgTd = document.createElement('td');
         imgTd.style.padding = '8px';
@@ -1017,7 +948,6 @@
         img.onerror = () => { img.src = noImageSvg; };
         imgTd.appendChild(img);
         row.appendChild(imgTd);
-
         const titleTd = document.createElement('td');
         titleTd.innerText = p.title || '';
         titleTd.style.maxWidth = '280px';
@@ -1027,39 +957,33 @@
         titleTd.style.padding = '8px';
         titleTd.title = p.title || '无标题';
         row.appendChild(titleTd);
-
         // 新增：上架日期
         const dateTd = document.createElement('td');
         dateTd.innerText = p.firstDate || '-';
         dateTd.style.padding = '8px';
         dateTd.style.textAlign = 'center';
         row.appendChild(dateTd);
-
         const weightTd = document.createElement('td');
         weightTd.innerText = p.weightGram || '0.00';
         weightTd.style.padding = '8px';
         weightTd.style.textAlign = 'center';
         row.appendChild(weightTd);
-
         const sellerTd = document.createElement('td');
         sellerTd.innerText = p.sellerCount;
         sellerTd.style.padding = '8px';
         sellerTd.style.textAlign = 'center';
         row.appendChild(sellerTd);
-
         const priceTd = document.createElement('td');
         priceTd.innerText = `${p.minPrice} ${p.currency}`;
         priceTd.style.padding = '8px';
         priceTd.style.textAlign = 'center';
         priceTd.style.whiteSpace = 'nowrap';
         row.appendChild(priceTd);
-
         const smallRankTd = document.createElement('td');
         smallRankTd.innerText = p.smallRank ? `${p.smallRank.Title}\n${p.smallRank.Rank}` : '-';
         smallRankTd.style.padding = '8px';
         smallRankTd.style.textAlign = 'center';
         row.appendChild(smallRankTd);
-
         // 所有国家销量列
         const ccList = ['GB', 'DE', 'FR', 'IT', 'ES'];
         ccList.forEach(cc => {
@@ -1076,19 +1000,15 @@
             }
             row.appendChild(td);
         });
-
         tbody.appendChild(row);
     }
-
     function clearProductTable() {
         document.getElementById('productTableBody').innerHTML = '';
     }
-
     // ========== 业务 ==========
     function buildUrl(storeId, page) {
         return `https://www.${currentSite.domain}/s?i=merchant-items&s=exact-aware-popularity-rank&me=${storeId}&page=${page}`;
     }
-
     async function fetchPageAsins(storeId, page, retryCount = 0) {
         const MAX_RETRY = 5;
         if (abortFlag) return [];
@@ -1123,7 +1043,6 @@
             }
         }
     }
-
     function getDetailToken() {
         const zytoken = getZyToken();
         if (!zytoken) {
@@ -1132,20 +1051,19 @@
         }
         return zytoken;
     }
-
     function getFingerId() {
         return GM_getValue("zying_fingerid", `auto_${Math.random().toString(36).substr(2, 16)}`);
     }
-
+    // 【修改】包裹retryOn429，实现429自动重登重试
     async function getBatchSalesData(asins, cc) {
-        const token = getDetailToken();
-        if (!asins.length) return {};
-        const ts = String(Math.floor(Date.now() / 1000));
-        const data = JSON.stringify({ abbr: cc, pagesize: 200, keys: asins });
-        const path = "/api/CmdHandler?cmd=zscout_asin.list";
-        const signStr = data + "POST" + path + ts + token + "v1";
-        const sign = CryptoJS.HmacSHA256(signStr, "https://amazon.zying.net").toString(CryptoJS.enc.Hex);
-        try {
+        return await retryOn429(async () => {
+            const token = getDetailToken();
+            if (!asins.length) return {};
+            const ts = String(Math.floor(Date.now() / 1000));
+            const data = JSON.stringify({ abbr: cc, pagesize: 200, keys: asins });
+            const path = "/api/CmdHandler?cmd=zscout_asin.list";
+            const signStr = data + "POST" + path + ts + token + "v1";
+            const sign = CryptoJS.HmacSHA256(signStr, "https://amazon.zying.net").toString(CryptoJS.enc.Hex);
             const r = await gmRequest({
                 method: 'POST',
                 url: 'https://amazon.zying.net' + path,
@@ -1166,25 +1084,20 @@
                 map[it.asin] = { sales: it.sales || 0, thumb: it.thumb || '', title: it.title || '' };
             });
             return map;
-        } catch (e) {
-            if (e.message.includes('401')) handleZyLoginExpired();
-            log(`获取销量失败：${e.message}`);
-            return {};
-        }
+        });
     }
-
+    // 【修改】包裹retryOn429，移除原429终止逻辑，实现自动重登重试
     async function getBatchAsinDetail(asins, cc, retryCount = 0) {
-        const token = getDetailToken();
-        const fingerid = getFingerId();
-        const MAX_RETRY = 3;
-        if (!asins.length) return {};
-        await delay(2000);
-        const ts = String(Math.floor(Date.now() / 1000));
-        const data = JSON.stringify(asins.map(a => ({ asin: a })));
-        const path = `/api/zbig/MoreAboutAsin/v2/${cc.toLowerCase()}`;
-        const signStr = data + "POST" + path + ts + token + "v1";
-        const sign = CryptoJS.HmacSHA256(signStr, "https://amazon.zying.net").toString(CryptoJS.enc.Hex);
-        try {
+        return await retryOn429(async () => {
+            const token = getDetailToken();
+            const fingerid = getFingerId();
+            if (!asins.length) return {};
+            await delay(2000);
+            const ts = String(Math.floor(Date.now() / 1000));
+            const data = JSON.stringify(asins.map(a => ({ asin: a })));
+            const path = `/api/zbig/MoreAboutAsin/v2/${cc.toLowerCase()}`;
+            const signStr = data + "POST" + path + ts + token + "v1";
+            const sign = CryptoJS.HmacSHA256(signStr, "https://amazon.zying.net").toString(CryptoJS.enc.Hex);
             const r = await gmRequest({
                 method: 'POST',
                 url: 'https://amazon.zying.net' + path,
@@ -1204,64 +1117,42 @@
                 timeout: 15000
             });
             const res = JSON.parse(r.responseText);
-            if (res.code === 401||res.code === 429) { handleZyLoginExpired(); return {}; }
+            if (res.code === 401) { handleZyLoginExpired(); return {}; }
             return res;
-        } catch (e) {
-            if (e.message.includes('401')) { handleZyLoginExpired(); }
-            else if ((e.message.includes('429') || e.message.includes('426')) && retryCount < MAX_RETRY) {
-                await delay((retryCount + 1) * 40000);
-                return getBatchAsinDetail(asins, cc, retryCount + 1);
-            } else if (retryCount >= MAX_RETRY) {
-                abortFlag = true;
-                showCopyToast('请求频繁，稍后再试');
-            }
-            log(`获取详情失败：${e.message}`);
-            return {};
-        }
+        });
     }
-
     // 核心逻辑：新增上架日期处理
     function processSingleAsin(asin, detailData, salesMap) {
         const d = detailData.data?.[asin] || detailData[asin] || {};
         const offers = d.Offers || [];
         const sellerId = d.SellerId || '';
-
         const self = offers.find(o => o.SellerId === sellerId);
         const isSelfFBA = !!self && self.IsFba === true;
-
         // ========== 【核心新增】检查是否存在黑名单卖家（小写匹配） ==========
         const hasBlacklistedSeller = offers.some(offer => {
             const offerSellerId = offer.SellerId?.toLowerCase().trim() || '';
             return blacklistedSellers.has(offerSellerId);
         });
-
         const brandList = d.BrandSourceDetails || [];
         const brandRegistered =
               brandList.filter(i => ['GB', 'DE', 'FR', 'IT', 'ES'].includes(i.Source) && i.Status === '已注册').length >= 2
         || brandList.some(i => i.Source === currentSite.code && i.Status === '已注册')
         || brandList.length > 5;
-
         const prices = offers.map(o => o.Listing).filter(x => x > 0);
         const minPrice = prices.length ? Math.min(...prices) : 0;
         const currency = offers[0]?.Currency || currentSite.currency;
-
         const bsr = d.BSR || [];
         let smallRank = bsr[0] || null;
-
         const si = salesMap.GB?.[asin] || {};
-
         const packageWeight = d.PackageWeight || 0;
         const weightGram = poundToGram(packageWeight);
-
         // 提取上架日期，只保留日期部分
         let firstDate = '';
         if (d.FirstTime) {
             firstDate = d.FirstTime.split(' ')[0];
         }
-
         const thumb = si.thumb || asinAmazonInfoMap[asin]?.thumb || '';
         const title = si.title || asinAmazonInfoMap[asin]?.title || '';
-
         const product = {
             asin,
             title: title,
@@ -1283,11 +1174,9 @@
             isSelfFBA,
             hasBlacklistedSeller // 存入标记
         };
-
         const minPriceThreshold = getFinalMinPrice();
         log(`当前筛选门槛：${minPriceThreshold} ${currentSite.currency}`);
         const fbaCondition = currentConfig.includeSelfFBA ? true : !product.isSelfFBA;
-
         // ========== 【核心】加入黑名单校验：存在则直接不合格 ==========
         const ok =
               minPrice >= minPriceThreshold
@@ -1300,10 +1189,8 @@
         if(hasBlacklistedSeller){
             log(`🚫 黑名单剔除 ${asin} | 存在指定跟卖卖家`);
         }
-
         return { product, isQualified: ok };
     }
-
     async function processAsinBatch(batch) {
         if (!batch.length || abortFlag) return;
         const ccList = ['GB', 'DE', 'FR', 'IT', 'ES'];
@@ -1326,7 +1213,6 @@
             }
         }
     }
-
     async function fetchPages(storeId, total, maxConcurrent) {
         const all = new Set();
         let page = 1;
@@ -1342,7 +1228,6 @@
         }
         return Array.from(all);
     }
-
     function cancelFilter() {
         abortFlag = true;
         isRunning = false;
@@ -1350,21 +1235,17 @@
         document.getElementById('startFilterBtn').disabled = false;
         log('已取消');
     }
-
     async function startBatchFilter() {
         if (isRunning) return;
         if (!storeId) return alert('未获取店铺ID');
-
         productData = [];
         currentConfig.judgePages = +document.getElementById('judgePages').value || 5;
         currentConfig.maxSellerThreshold = +document.getElementById('maxSellerThreshold').value || 6;
         currentConfig.maxConcurrentPages = +document.getElementById('maxConcurrentPages').value || 3;
         currentConfig.includeSelfFBA = includeSelfFBACheckbox?.checked || DEFAULT_CONFIG.includeSelfFBA;
-
         const finalMinPrice = getFinalMinPrice();
         log(`本次筛选最低价格门槛：${finalMinPrice} ${currentSite.currency}`);
         log(`本次筛选FBA配置：${currentConfig.includeSelfFBA ? '包含FBA' : '排除FBA'}`);
-
         isRunning = true;
         abortFlag = false;
         clearLog();
@@ -1373,7 +1254,6 @@
         const cancelBtn = document.getElementById('cancelFilterBtn');
         startBtn.disabled = true;
         cancelBtn.style.display = 'inline-block';
-
         try {
             getDetailToken();
             const asins = await fetchPages(storeId, currentConfig.judgePages, currentConfig.maxConcurrentPages);
@@ -1396,7 +1276,6 @@
             cancelBtn.style.display = 'none';
         }
     }
-
     function init() {
         storeId = parseStoreIdFromUrl();
         parseCurrentAmazonSite();
@@ -1405,8 +1284,6 @@
         document.getElementById('currentStoreId').textContent = displayKey;
         log('初始化完成');
     }
-
     if (document.readyState === 'complete') init();
     else window.addEventListener('load', init);
-
 })();
