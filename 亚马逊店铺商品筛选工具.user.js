@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         亚马逊店铺商品筛选工具
 // @namespace    amazon-store-filter-multicountry
-// @version      5.7
+// @version      5.8
 // @description  解析URL中的seller编码，多国家销量查询，可视化表格展示筛选结果，支持本地缓存
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
@@ -42,7 +42,7 @@
     // ========== 【新增】黑名单卖家ID配置（小写匹配） ==========
     const blacklistedSellers = new Set();
     [
-        "A3KWBSYD24ALO;彭旭","A1AGUX0XE6RFS8;王华宇","AZA23B0AA7OH7;彭雄",
+        "A3KWBSYD24ALO0;彭旭","A1AGUX0XE6RFS8;王华宇","AZA23B0AA7OH7;彭雄",
         "A15TABY6SLL8U7;李海鹏","A2S73B5VZ8N3U3;夏银雪","A1IR2E8KFOWN3P;彭水香",
         "A3QPZVYNJ4UXDQ;郭冬明","A1DJ37ELZU4KW0;韩花楠","A1TYHNO3PSR3A;蒋争争",
         "APFZMLZJYIKF7;聂洪荣","A1AGUX0XE6RFS8;梅咏秋","A2P6E2J0V7PORA;舒蕾",
