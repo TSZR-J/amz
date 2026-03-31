@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         欧代处理插件
 // @namespace    http://tampermonkey.net/
-// @version      1.6
+// @version      1.8
 // @description  自动循环处理商品政策页面的提交→选择指定地址（无则选第一个）→保存→关闭流程
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/欧代处理插件.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/欧代处理插件.user.js
@@ -53,27 +53,38 @@
         isStop = false;
         // 目标公司名称（优先匹配地址）
         const targetCompanyName = "TULIPWAYS CO LTD";
+        // 需要匹配的GPSR文本
+        const targetGPSRText = "GPSR： 负责人详细联系信息";
 
-        // 获取所有提交按钮
-        const submitButtons = document.querySelectorAll('kat-button[data-testid^="ahd-action-button-"]');
-        if (submitButtons.length === 0) {
-            alert('未找到需要处理的提交按钮！');
+        // 获取所有政策行（包含普通行 + 嵌套行）
+        const policyRows = document.querySelectorAll('.ahd-product-policy-table-row-wrapper, .ahd-product-policy-table-row-wrapper-nested');
+        if (policyRows.length === 0) {
+            alert('未找到任何商品政策条目！');
             return;
         }
 
-        // 过滤出仅label为“提交”的按钮（跳过“查看提交”）
-        const validSubmitButtons = Array.from(submitButtons).filter(btn => {
+        // 筛选：只保留 包含GPSR指定文本 + 按钮是【提交】的行
+        const validRows = Array.from(policyRows).filter(row => {
+            // 检查是否包含目标GPSR文本
+            const hasGPSR = row.textContent.includes(targetGPSRText);
+            if (!hasGPSR) return false;
+
+            // 检查按钮是否是【提交】
+            const btn = row.querySelector('kat-button[data-testid^="ahd-action-button-"]');
+            if (!btn) return false;
             const btnLabel = btn.getAttribute('label') || '';
             return btnLabel.trim() === '提交';
         });
 
-        if (validSubmitButtons.length === 0) {
-            alert('所有按钮均为“查看提交”，无需要处理的“提交”按钮！');
+        if (validRows.length === 0) {
+            alert('未找到符合条件的条目：需同时满足「GPSR：负责人详细联系信息」+「提交」按钮！');
             return;
         }
 
-        // 循环处理有效提交按钮
-        for (let i = 0; i < validSubmitButtons.length; i++) {
+        console.log(`共找到 ${validRows.length} 个符合条件的GPSR提交条目`);
+
+        // 循环处理符合条件的条目
+        for (let i = 0; i < validRows.length; i++) {
             if(isStop) {
                 console.log("用户手动停止脚本");
                 alert("脚本已停止！");
@@ -81,11 +92,13 @@
             }
 
             try {
-                console.log(`正在处理第 ${i+1}/${validSubmitButtons.length} 个有效按钮`);
-                const btn = validSubmitButtons[i];
+                console.log(`正在处理第 ${i+1}/${validRows.length} 个符合条件的条目`);
+                const row = validRows[i];
+                // 获取当前行的提交按钮
+                const submitBtn = row.querySelector('kat-button[data-testid^="ahd-action-button-"]');
 
                 // 步骤1：点击提交按钮
-                btn.click();
+                submitBtn.click();
                 console.log('已点击提交按钮，等待地址弹窗出现...');
 
                 // 步骤2：等待3秒 + 优先找目标地址，无则选第一个
@@ -118,13 +131,13 @@
                 // 步骤5：点击关闭按钮
                 const closeButton = await waitForElement('kat-button[label="关闭"][variant="primary"]');
                 closeButton.click();
-                console.log(`第 ${i+1} 个按钮处理完成！`);
+                console.log(`第 ${i+1} 个条目处理完成！`);
 
                 // 处理下一个前稍等，避免页面卡顿
                 await sleep(1000);
             } catch (error) {
                 if(isStop) break;
-                console.error(`处理第 ${i+1} 个按钮时出错：`, error);
+                console.error(`处理第 ${i+1} 个条目时出错：`, error);
                 try {
                     const closeButton = await waitForElement('span[aria-hidden="true"]');
                     closeButton.click();
@@ -133,7 +146,7 @@
             }
         }
 
-        if(!isStop) alert(`共处理 ${validSubmitButtons.length} 个有效提交按钮，完成！`);
+        if(!isStop) alert(`处理完成！共处理 ${validRows.length} 个GPSR提交条目`);
     };
 
     // 5. 添加操作按钮到页面
