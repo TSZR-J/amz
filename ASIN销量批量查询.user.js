@@ -1,10 +1,10 @@
 // ==UserScript==
-// @name         ASIN销量查询(v3.5)（弹窗版）
+// @name         ASIN销量查询(v3.6)（弹窗版）
 // @namespace    http://tampermonkey.net/
-// @version      3.5
+// @version      3.6
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
-// @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
-// @description  单击选中+复制/右键复制（清晰+居中+登录+表格滚动修复）
+// @updateURL  https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
+// @description  单击选中+复制+各国销量+跟卖姓名+价格+规格自动换行+401登录失效提示
 // @author       You
 // @match        *://*/*
 // @grant        GM.xmlHttpRequest
@@ -17,13 +17,16 @@
 
 (function() {
     'use strict';
-
+    // 只在顶层窗口运行，iframe 内部直接退出，不显示任何内容
+    if (window.self !== window.top) {
+        return;
+    }
     const amazonSites = [
-        { name: "英国", code: "GB", colIndex: 2 },
-        { name: "法国", code: "FR", colIndex: 3 },
-        { name: "德国", code: "DE", colIndex: 4 },
-        { name: "意大利", code: "IT", colIndex: 5 },
-        { name: "西班牙", code: "ES", colIndex: 6 }
+        { name: "英国", code: "GB", colIndex: 2, currency: "£" },
+        { name: "法国", code: "FR", colIndex: 3, currency: "€" },
+        { name: "德国", code: "DE", colIndex: 4, currency: "€" },
+        { name: "意大利", code: "IT", colIndex: 5, currency: "€" },
+        { name: "西班牙", code: "ES", colIndex: 6, currency: "€" }
     ];
     const SIZE_COL_INDEX = 1;
     const specPriority = ['GB', 'DE', 'IT', 'ES', 'FR'];
@@ -34,6 +37,7 @@
     let selectedAsins = new Set();
     let asinRowMap = new Map();
     let asinSpecCache = new Map();
+    let asinCountryPriceCache = new Map();
     const domain = new URL(window.location.href).hostname;
 
     let token;
@@ -58,15 +62,15 @@
 
     const sellerIdToPerson = new Map();
     [
-        "A3KWBSYD24ALO;彭旭","A1AGUX0XE6RFS8;王华宇","AZA23B0AA7OH7;彭雄",
-        "A15TABY6SLL8U7;李海鹏","A2S73B5VZ8N3U3;夏银雪","A1IR2E8KFOWN3P;彭水香",
-        "A3QPZVYNJ4UXDQ;郭冬明","A1DJ37ELZU4KW0;韩花楠","A1TYHNO3PSR3A;蒋争争",
-        "APFZMLZJYIKF7;聂洪荣","A1AGUX0XE6RFS8;梅咏秋","A2P6E2J0V7PORA;舒蕾",
-        "A2RRES2N4V5JX2;刘常青","APOU9GGLPJWQG;刘浩瀚","A1CUDD63ZN4763;刘景平",
-        "A33FD7G7VE21R1;陈林秀","A3HTYB8UR7TMOM;黄绍梅","A3VF36OIAZNR4F;廖春花",
-        "A5BKGE50S2UJL;彭苟根","A3UQLIM14446WU;黄敏","AKQJ5QVD5BN2H;黄金根",
-        "A2NQ9DMPFHO4DN;钱春华","A39X67PN5QRMCW;陈锡岚","A29XASP7A4XURC;薛园琴",
-        "A3RSZUJWT6AB2D;舒兵太","A31N3IR8B0X213;吴双娥","A1V0C5VU5N96HN;吴建贵"
+        "A2RRES2N4V5JX2;刘常青","A1CUDD63ZN4763;刘景平","APOU9GGLPJWQG;刘浩瀚",
+        "A31N3IR8B0X213;吴双娥","A1V0C5VU5N96HN;吴建贵","A2S73B5VZ8N3U3;夏银雪",
+        "A3VF36OIAZNR4F;廖春花","A3KWBSYD24ALO0;彭旭","A1IR2E8KFOWN3P;彭水香",
+        "A5BKGE50S2UJL;彭苟根","AZA23B0AA7OH7;彭雄","A15TABY6SLL8U7;李海鹏",
+        "A1AGUX0XE6RFS8;梅咏秋","AC4F29DKYT0CJ;王华宇","APFZMLZJYIKF7;聂洪荣",
+        "A3RSZUJWT6AB2D;舒兵太","A2P6E2J0V7PORA;舒蕾","A1TYHNO3PSR3A;蒋争争",
+        "A29XASP7A4XURC;薛园琴","A3QPZVYNJ4UXDQ;郭冬明","A2NQ9DMPFHO4DN;钱春华",
+        "A33FD7G7VE21R1;陈林秀","A39X67PN5QRMCW;陈锡岚","A1DJ37ELZU4KW0;韩花楠",
+        "A3UQLIM14446WU;黄敏","A3HTYB8UR7TMOM;黄绍梅","AKQJ5QVD5BN2H;黄金根"
     ].forEach(item => {
         const [id, name] = item.split(';');
         id && sellerIdToPerson.set(id.trim().toLowerCase(), name.trim());
@@ -85,7 +89,7 @@
         }
         #asinQueryModal {
             position:fixed; top:0; left:0; right:0; bottom:0; margin:auto;
-            width:95%;max-width:1000px; height:fit-content; max-height:85vh;
+            width:95%;max-width:1300px; height:fit-content; max-height:85vh;
             background:#f5f5f5; border-radius:8px; padding:20px; box-shadow:0 4px 20px rgba(0,0,0,0.3);
             z-index:10000; display:none; overflow:hidden;
             -webkit-font-smoothing: antialiased;
@@ -109,7 +113,6 @@
         #modalClearBtn { background:#f56c6c; }
         #modalLoginBtn { background:#67c23a; }
 
-        /* ========== 表格滚动彻底修复 ========== */
         .table-container {
             width: 100%;
             max-height: 420px;
@@ -131,24 +134,37 @@
         }
         #resultTable th {
             color:white; padding:12px 8px; font-weight:bold; font-size:14px;
+            cursor: pointer;
         }
         #resultTable td {
             padding:10px 8px; border:1px solid #ddd; font-size:13px;
-            word-break: break-all;
+            word-break: break-word;
+            white-space: normal;
+            line-height: 1.4;
         }
+        #resultTable th:nth-child(1), #resultTable td:nth-child(1) { width: 16%; }
+        #resultTable th:nth-child(2), #resultTable td:nth-child(2) { width: 28%; }
+        #resultTable th:nth-child(3), #resultTable td:nth-child(3) { width: 14%; }
+        #resultTable th:nth-child(4), #resultTable td:nth-child(4) { width: 14%; }
+        #resultTable th:nth-child(5), #resultTable td:nth-child(5) { width: 14%; }
+        #resultTable th:nth-child(6), #resultTable td:nth-child(6) { width: 14%; }
+        #resultTable th:nth-child(7), #resultTable td:nth-child(7) { width: 14%; }
+
         .asin-cell { cursor:pointer;color:#0078d7;text-decoration:underline; }
         .asin-cell.selected { background:#409eff!important; color:white!important; font-weight:bold; }
 
         .copy-toast {
             position:fixed; top:0; left:0; right:0; bottom:0; margin:auto;
-            width:200px; height:50px; line-height:50px;
+            width:260px; height:50px; line-height:50px;
             background:rgba(0,0,0,0.7);color:white;border-radius:6px;
             font-size:14px;z-index:10002;display:none;text-align:center;
         }
-        .seller-match-tip { margin-left:6px; font-size:12px; font-weight:bold!important; }
-        .seller-green { color:#0078d7!important; }
-        .seller-red { color:#ff4d4f!important; }
-        .seller-gray { color:#999!important; }
+
+        .sales { color: #0066cc; font-weight: bold; }
+        .seller-name { color: #009933; font-weight: bold; }
+        .not-followed { color: #ff3333; font-weight: bold; }
+        .price { color: #ff6600; font-weight: bold; }
+        .sep { color: #999; margin: 0 2px; }
 
         ::-webkit-scrollbar { width:8px; height:8px; }
         ::-webkit-scrollbar-track { background:#f1f1f1; border-radius:4px; }
@@ -180,7 +196,7 @@
         }
         t.textContent = text;
         t.style.display = 'block';
-        setTimeout(() => t.style.display = 'none', 1500);
+        setTimeout(() => t.style.display = 'none', 2500);
     }
 
     function openZyingLogin() {
@@ -210,6 +226,25 @@
         showCopyToast(`已复制 ${selectedAsins.size} 个ASIN`);
     }
 
+    function makeCopyCountryPriceHandler(countryCode) {
+        return function(e) {
+            e.preventDefault();
+            if (selectedAsins.size === 0) {
+                showCopyToast('未选中任何ASIN');
+                return;
+            }
+            const prices = [];
+            selectedAsins.forEach(asin => {
+                const cp = asinCountryPriceCache.get(asin) || {};
+                const p = cp[countryCode];
+                prices.push(p === 0 || p == null ? '无数据' : p);
+            });
+            copyTextToClipboard(prices.join('\n'));
+            const site = amazonSites.find(s => s.code === countryCode);
+            showCopyToast(`已复制 ${selectedAsins.size} 个【${site?.name}】价格`);
+        };
+    }
+
     function getCombinedSpec(color, size) {
         const c = (color || '').trim(), s = (size || '').trim();
         return c && s ? `${c}-${s}` : c || s || '';
@@ -219,6 +254,12 @@
         const m = asinSpecCache.get(asin) || {};
         for (const c of specPriority) if (m[c]) return m[c];
         return '无数据';
+    }
+
+    // 401 登录失效统一处理
+    function handle401Unauthorized() {
+        showCopyToast("登录失效，请重新点击登录智赢");
+        throw new Error("401 登录已失效，终止查询");
     }
 
     function sendBatchAsinDetailRequest(asins, code, token) {
@@ -240,7 +281,24 @@
                     Signature:sign, Timestamp:ts
                 },
                 onload(r) {
-                    try { resolve(JSON.parse(r.responseText)) } catch(e) { reject(e) }
+                    try {
+                        // 401 登录失效
+                        if (r.status === 401) {
+                            handle401Unauthorized();
+                            reject(new Error("401"));
+                            return;
+                        }
+
+                        const d = JSON.parse(r.responseText);
+                        // 业务 code 401 也统一处理
+                        if (d.code === 401) {
+                            handle401Unauthorized();
+                            reject(new Error("401"));
+                            return;
+                        }
+
+                        resolve(d);
+                    } catch(e) { reject(e); }
                 },
                 onerror: reject,
                 timeout: 10000
@@ -248,30 +306,50 @@
         });
     }
 
-    function batchUpdateSellerMatch(asins, code, salesMap, token) {
-        sendBatchAsinDetailRequest(asins, code, token).then(d => {
+    function batchUpdateSellerMatchAndPrice(asins, code, salesMap, token) {
+        return sendBatchAsinDetailRequest(asins, code, token).then(d => {
             if (d.code !== 200 || !d.data) return;
             asins.forEach(asin => {
-                const r = asinRowMap.get(asin)?.row;
-                if (!r) return;
-                let found = null;
+                const row = asinRowMap.get(asin)?.row;
+                if (!row) return;
+
+                let foundName = null;
+                let minPrice = 0;
                 const offers = (d.data[asin] || {}).Offers || [];
+
+                const prices = offers.map(o => o.Listing).filter(x => x > 0);
+                if (prices.length) minPrice = Math.min(...prices);
+
                 for (const o of offers) {
                     const sid = (o.SellerId || "").toLowerCase().trim();
                     if (sellerIdToPerson.has(sid)) {
-                        found = sellerIdToPerson.get(sid);
+                        foundName = sellerIdToPerson.get(sid);
                         break;
                     }
                 }
+
+                const cp = asinCountryPriceCache.get(asin) || {};
+                cp[code] = minPrice;
+                asinCountryPriceCache.set(asin, cp);
+
                 const site = amazonSites.find(s => s.code === code);
                 if (!site) return;
-                const cell = r.cells[site.colIndex];
+                const cell = row.cells[site.colIndex];
                 const sales = salesMap[asin] || "无数据";
-                const cls = found ? "seller-green" : "seller-red";
-                const tip = found ? `（${found}）` : "（未跟卖）";
-                cell.innerHTML = `${sales}<span class="seller-match-tip ${cls}">${tip}</span>`;
+
+                const salesHtml = `<span class="sales">${sales}</span>`;
+                const followHtml = foundName
+                ? `<span class="seller-name">${foundName}</span>`
+                    : `<span class="not-followed">未跟卖</span>`;
+                const priceHtml = minPrice > 0
+                ? `<span class="price">${site.currency}${minPrice}</span>`
+                    : `<span class="price">--</span>`;
+
+                cell.innerHTML = `${salesHtml}<span class="sep">|</span>${followHtml}<span class="sep">|</span>${priceHtml}`;
             });
-        }).catch(()=>{});
+        }).catch(err => {
+            if (err.message === "401") return Promise.reject(err);
+        });
     }
 
     function initAsinTable(asins = []) {
@@ -279,6 +357,7 @@
         tb.innerHTML = '';
         asinRowMap.clear();
         asinSpecCache.clear();
+        asinCountryPriceCache.clear();
         selectedAsins.clear();
 
         if (!asins.length) {
@@ -293,6 +372,7 @@
 
         asins.forEach(asin => {
             asinSpecCache.set(asin, {});
+            asinCountryPriceCache.set(asin, {});
             const tr = document.createElement('tr');
 
             const asinTd = document.createElement('td');
@@ -327,16 +407,17 @@
         if (!token) {
             asins.forEach(a => {
                 const r = asinRowMap.get(a)?.row;
-                if (r) r.cells[site.colIndex].innerHTML = "未登录<span class='seller-gray'>（未登录）</span>";
+                if (r) r.cells[site.colIndex].innerHTML = '<span class="not-followed">未登录</span>';
             });
             return;
         }
+
         const ts = Math.round(Date.now()/1000)+'';
         const data = JSON.stringify({ abbr:site.code, pagesize:BATCH_SIZE, keys:asins });
         const signStr = data + "POST" + "/api/CmdHandler?cmd=zscout_asin.list" + ts + token + "v1";
         const sign = CryptoJS.HmacSHA256(signStr, "https://amazon.zying.net").toString(CryptoJS.enc.Hex);
 
-        return new Promise(resolve => {
+        return new Promise((resolve, reject) => {
             GM.xmlHttpRequest({
                 method: "POST",
                 url: API_LIST_URL,
@@ -347,7 +428,19 @@
                 },
                 onload(r) {
                     try {
+                        if (r.status === 401) {
+                            handle401Unauthorized();
+                            reject(new Error("401"));
+                            return;
+                        }
+
                         const j = JSON.parse(r.responseText);
+                        if (j.code === 401) {
+                            handle401Unauthorized();
+                            reject(new Error("401"));
+                            return;
+                        }
+
                         const salesMap = {};
                         asins.forEach(a => salesMap[a] = "无数据");
                         if (j.code === 200 && j.data?.list) {
@@ -364,9 +457,9 @@
                             const row = asinRowMap.get(a)?.row;
                             if (row) row.cells[site.colIndex].textContent = salesMap[a];
                         });
-                        batchUpdateSellerMatch(asins, site.code, salesMap, token);
-                    } catch(e){}
-                    resolve();
+
+                        batchUpdateSellerMatchAndPrice(asins, site.code, salesMap, token).then(resolve).catch(reject);
+                    } catch(e){ resolve(); }
                 },
                 onerror: () => resolve(),
                 timeout: 10000
@@ -375,13 +468,18 @@
     }
 
     async function processRequests(allAsins, token) {
-        const batches = chunkArray(allAsins, BATCH_SIZE);
-        const delay = 200;
-        for (const site of amazonSites) {
-            for (const b of batches) {
-                await new Promise(r => setTimeout(r, delay));
-                await sendBatchSalesRequest(site, b, token);
+        try {
+            const batches = chunkArray(allAsins, BATCH_SIZE);
+            const delay = 200;
+            for (const site of amazonSites) {
+                for (const b of batches) {
+                    await new Promise(r => setTimeout(r, delay));
+                    await sendBatchSalesRequest(site, b, token);
+                }
             }
+        } catch (err) {
+            // 401 终止所有请求
+            console.log("查询已终止：", err);
         }
     }
 
@@ -396,7 +494,7 @@
     function renderDOM() {
         const btn = document.createElement('button');
         btn.id = 'asinQueryBtn';
-        btn.textContent = 'ASIN销量查询(v3.5)';
+        btn.textContent = 'ASIN销量查询(v3.6)';
         btn.onclick = () => {
             document.getElementById('asinQueryModalMask').style.display = 'block';
             document.getElementById('asinQueryModal').style.display = 'block';
@@ -415,7 +513,7 @@
         modal.id = 'asinQueryModal';
         modal.innerHTML = `
             <div id="modalCloseBtn">×</div>
-            <h3 style="text-align:center;">ASIN销量查询(v3.5)</h3>
+            <h3 style="text-align:center;">ASIN销量查询(v3.6)</h3>
             <div class="modal-form-group">
                 <label>ASIN输入（一行一个）：</label>
                 <textarea id="modalAsinInput" placeholder="B0C84J3HFR\nB08XXXXXXX"></textarea>
@@ -431,11 +529,11 @@
                         <tr>
                             <th>ASIN（单击复制/右键多选）</th>
                             <th>规格</th>
-                            <th>英国</th>
-                            <th>法国</th>
-                            <th>德国</th>
-                            <th>意大利</th>
-                            <th>西班牙</th>
+                            <th id="header_GB">英国（右键复制价格）</th>
+                            <th id="header_FR">法国（右键复制价格）</th>
+                            <th id="header_DE">德国（右键复制价格）</th>
+                            <th id="header_IT">意大利（右键复制价格）</th>
+                            <th id="header_ES">西班牙（右键复制价格）</th>
                         </tr>
                     </thead>
                     <tbody id="tableBody"></tbody>
@@ -454,6 +552,11 @@
             initAsinTable();
         };
         document.getElementById('modalLoginBtn').onclick = openZyingLogin;
+
+        amazonSites.forEach(site => {
+            const el = document.getElementById(`header_${site.code}`);
+            el.addEventListener('contextmenu', makeCopyCountryPriceHandler(site.code));
+        });
 
         initAsinTable();
     }
