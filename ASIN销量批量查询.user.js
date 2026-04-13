@@ -63,15 +63,15 @@
 
     const sellerIdToPerson = new Map();
     [
-        "A3KWBSYD24ALO0;彭旭", "A1AGUX0XE6RFS8;王华宇", "AZA23B0AA7OH7;彭雄",
-        "A15TABY6SLL8U7;李海鹏", "A2S73B5VZ8N3U3;夏银雪", "A1IR2E8KFOWN3P;彭水香",
-        "A3QPZVYNJ4UXDQ;郭冬明", "A1DJ37ELZU4KW0;韩花楠", "A1TYHNO3PSR3A;蒋争争",
-        "APFZMLZJYIKF7;聂洪荣", "A1AGUX0XE6RFS8;梅咏秋", "A2P6E2J0V7PORA;舒蕾",
-        "A2RRES2N4V5JX2;刘常青", "APOU9GGLPJWQG;刘浩瀚", "A1CUDD63ZN4763;刘景平",
-        "A33FD7G7VE21R1;陈林秀", "A3HTYB8UR7TMOM;黄绍梅", "A3VF36OIAZNR4F;廖春花",
-        "A5BKGE50S2UJL;彭苟根", "A3UQLIM14446WU;黄敏", "AKQJ5QVD5BN2H;黄金根",
-        "A2NQ9DMPFHO4DN;钱春华", "A39X67PN5QRMCW;陈锡岚", "A29XASP7A4XURC;薛园琴",
-        "A3RSZUJWT6AB2D;舒兵太", "A31N3IR8B0X213;吴双娥", "A1V0C5VU5N96HN;吴建贵"
+        "A2RRES2N4V5JX2;刘常青","A1CUDD63ZN4763;刘景平","APOU9GGLPJWQG;刘浩瀚",
+        "A31N3IR8B0X213;吴双娥","A1V0C5VU5N96HN;吴建贵","A2S73B5VZ8N3U3;夏银雪",
+        "A3VF36OIAZNR4F;廖春花","A3KWBSYD24ALO0;彭旭","A1IR2E8KFOWN3P;彭水香",
+        "A5BKGE50S2UJL;彭苟根","AZA23B0AA7OH7;彭雄","A15TABY6SLL8U7;李海鹏",
+        "A1AGUX0XE6RFS8;梅咏秋","AC4F29DKYT0CJ;王华宇","APFZMLZJYIKF7;聂洪荣",
+        "A3RSZUJWT6AB2D;舒兵太","A2P6E2J0V7PORA;舒蕾","A1TYHNO3PSR3A;蒋争争",
+        "A29XASP7A4XURC;薛园琴","A3QPZVYNJ4UXDQ;郭冬明","A2NQ9DMPFHO4DN;钱春华",
+        "A33FD7G7VE21R1;陈林秀","A39X67PN5QRMCW;陈锡岚","A1DJ37ELZU4KW0;韩花楠",
+        "A3UQLIM14446WU;黄敏","A3HTYB8UR7TMOM;黄绍梅","AKQJ5QVD5BN2H;黄金根"
     ].forEach(item => {
         const [id, name] = item.split(';');
         id && sellerIdToPerson.set(id.trim().toLowerCase(), name.trim());
