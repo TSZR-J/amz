@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         ASIN销量查询(v4.3)
+// @name         ASIN销量查询(v4.4)
 // @namespace    http://tampermonkey.net/
-// @version      4.3
+// @version      4.4
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
 // @updateURL  https://raw.githubusercontent.com/TSZR-J/amz/main/ASIN销量批量查询.user.js
 // @description  单击选中+复制+各国销量+跟卖姓名+价格+规格自动换行+401登录失效提示
@@ -264,9 +264,10 @@ GM_addStyle(`
                     });
                 });
 
-                if (res.status === 401) { handle401Unauthorized(); return; }
+                if (res.status === 401 || res.status === 429) { handle401Unauthorized(); return; }
                 const j = JSON.parse(res.responseText);
-                if (j.code === 401) { handle401Unauthorized(); return; }
+                if (j.code === 401 || res.code === 429) { handle401Unauthorized(); return; }
+
                 if (j.code !== 200 || !j.data) {
                     processed += batch.length;
                     continue;
