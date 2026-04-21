@@ -266,7 +266,7 @@ GM_addStyle(`
 
                 if (res.status === 401 || res.status === 429) { handle401Unauthorized(); return; }
                 const j = JSON.parse(res.responseText);
-                if (j.code === 401 || res.code === 429) { handle401Unauthorized(); return; }
+                if (j.code === 401 || j.code === 429) { handle401Unauthorized(); return; }
 
                 if (j.code !== 200 || !j.data) {
                     processed += batch.length;
