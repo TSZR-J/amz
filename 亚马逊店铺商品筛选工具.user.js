@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         亚马逊店铺商品筛选工具
 // @namespace    amazon-store-filter-multicountry
-// @version      6.0
+// @version      6.1
 // @description  解析URL中的seller编码，多国家销量查询，可视化表格展示筛选结果，支持本地缓存
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
@@ -939,8 +939,8 @@
         imgTd.style.textAlign = 'center';
         const img = document.createElement('img');
         img.src = p.thumb || noImageSvg;
-        img.style.width = '60px';
-        img.style.height = '60px';
+        img.style.width = '80px';
+        img.style.height = '80px';
         img.style.objectFit = 'cover';
         img.style.borderRadius = '4px';
         img.style.cursor = 'pointer';
@@ -949,13 +949,14 @@
         imgTd.appendChild(img);
         row.appendChild(imgTd);
         const titleTd = document.createElement('td');
-        titleTd.innerText = p.title || '';
-        titleTd.style.maxWidth = '280px';
-        titleTd.style.whiteSpace = 'nowrap';
-        titleTd.style.overflow = 'hidden';
-        titleTd.style.textOverflow = 'ellipsis';
-        titleTd.style.padding = '8px';
-        titleTd.title = p.title || '无标题';
+titleTd.innerText = p.title || '';
+titleTd.style.width = '280px';        // 固定宽度
+titleTd.style.padding = '8px';
+titleTd.style.wordBreak = 'break-all';// 自动换行
+titleTd.style.whiteSpace = 'normal'; // 允许换行
+titleTd.style.lineHeight = '1.4';    // 行高更舒服
+titleTd.style.verticalAlign = 'middle';
+titleTd.title = p.title || '无标题';
         row.appendChild(titleTd);
         // 新增：上架日期
         const dateTd = document.createElement('td');
