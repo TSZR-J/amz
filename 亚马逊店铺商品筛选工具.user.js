@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         亚马逊店铺商品筛选工具
 // @namespace    amazon-store-filter-multicountry
-// @version      6.1
+// @version      6.2
 // @description  解析URL中的seller编码，多国家销量查询，可视化表格展示筛选结果，支持本地缓存
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
@@ -1010,40 +1010,124 @@ titleTd.title = p.title || '无标题';
     function buildUrl(storeId, page) {
         return `https://www.${currentSite.domain}/s?i=merchant-items&s=exact-aware-popularity-rank&me=${storeId}&page=${page}`;
     }
-    async function fetchPageAsins(storeId, page, retryCount = 0) {
-        const MAX_RETRY = 5;
-        if (abortFlag) return [];
-        const url = buildUrl(storeId, page);
-        log(`获取第${page}页${retryCount > 0 ? `（重试${retryCount}）` : ''}`);
-        try {
-            const delayMs = Math.floor(Math.random() * 4000) + 2000; // 2000~6000ms
-            log(`⏳ 亚马逊请求延迟 ${(delayMs / 1000).toFixed(1)}s 后发送: ${url}`);
-            await new Promise(r => setTimeout(r, delayMs));
-            const r = await gmRequest({ method: 'GET', url });
-            if (r.status === 503) {
-                throw "亚马逊503限流";
+
+// 隐藏iframe抓取页面，绕过亚马逊拦截
+function iframeFetch(url) {
+    return new Promise((resolve, reject) => {
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = `position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;border:0;opacity:0;`;
+        iframe.src = url;
+        let done = false;
+
+        iframe.onload = function () {
+            if (done) return;
+            done = true;
+            try {
+                const doc = iframe.contentDocument || iframe.contentWindow.document;
+                const html = doc.documentElement.outerHTML;
+                iframe.remove();
+                resolve({
+                    status: 200,
+                    responseText: html
+                });
+            } catch (err) {
+                iframe.remove();
+                reject(err);
             }
-            const doc = new DOMParser().parseFromString(r.responseText, 'text/html');
-            const set = new Set();
-            doc.querySelectorAll('[data-asin]').forEach(i => {
-                const a = i.dataset.asin?.trim();
-                if (a) set.add(a);
-            });
-            const asins = Array.from(set);
-            parseAmazonPageInfo(r.responseText, asins);
-            log(`第${page}页：${asins.length}个ASIN`);
-            return asins;
-        } catch (e) {
+        };
+
+        iframe.onerror = function () {
+            if (done) return;
+            done = true;
+            iframe.remove();
+            reject(new Error("iframe load error"));
+        };
+
+        setTimeout(() => {
+            if (done) return;
+            done = true;
+            iframe.remove();
+            reject(new Error("iframe timeout"));
+        }, 20000);
+
+        document.body.appendChild(iframe);
+    });
+}
+
+// 统一检测是否是亚马逊人机拦截页
+function isAmazonChallengeHtml(html) {
+    if (!html) return true;
+    return html.includes('bm-verify')
+        || html.includes('triggerInterstitial')
+        || html.includes('media-amazon.com/images/S/sash')
+        || html.includes('Please verify you are a human');
+}
+async function fetchPageAsins(storeId, page, retryCount=0) {
+    const MAX_RETRY = 5;
+    if (abortFlag) return [];
+    const url = buildUrl(storeId, page);
+    log(`获取第${page}页${retryCount > 0 ? `（重试${retryCount}）` : ''}`);
+
+    // 随机延时
+    const delayMs = Math.floor(Math.random() * 4000) + 2000;
+    log(`⏳ 延迟 ${(delayMs / 1000).toFixed(1)}s 后请求: ${url}`);
+    await new Promise(r => setTimeout(r, delayMs));
+
+    let useIframe = false;
+    let r = null;
+
+    try {
+        // 第一步：优先使用原来的 GM 请求
+        r = await gmRequest({
+            method: 'GET',
+            url
+        });
+        // 状态码判断
+        if (r.status === 503 || r.status === 429) {
+            throw new Error("status_" + r.status);
+        }
+        // 检测是否是验证页
+        if (isAmazonChallengeHtml(r.responseText)) {
+            throw new Error("challenge_page");
+        }
+    } catch (e) {
+        // 只要GM请求异常 / 503 / 验证页 → 切换iframe
+        log(`⚠️ 原请求失败(${e.message})，自动切换iframe模式`);
+        useIframe = true;
+    }
+
+    // 第二步：降级使用 iframe 访问
+    if (useIframe) {
+        try {
+            r = await iframeFetch(url);
+            if (isAmazonChallengeHtml(r.responseText)) {
+                throw new Error("iframe依然命中人机验证");
+            }
+        } catch (err) {
             if (retryCount < MAX_RETRY) {
-                log(`第${page}页失败：${e.message}`);
-                await delay((retryCount + 1) * 5000);
+                let waitTime = 10000 + (retryCount * 5000);
+                log(`第${page}页彻底拦截，等待${waitTime/1000}s后重试`);
+                await new Promise(r => setTimeout(r, waitTime));
                 return fetchPageAsins(storeId, page, retryCount + 1);
             } else {
-                log(`第${page}页失败：${e.message}`);
+                log(`第${page}页最终失败`);
                 return [];
             }
         }
     }
+
+    // 统一解析ASIN
+    const doc = new DOMParser().parseFromString(r.responseText, 'text/html');
+    const set = new Set();
+    doc.querySelectorAll('[data-asin]').forEach(i => {
+        const a = i.dataset.asin?.trim();
+        if (a) set.add(a);
+    });
+    const asins = Array.from(set);
+    parseAmazonPageInfo(r.responseText, asins);
+    log(`第${page}页：${asins.length}个ASIN`);
+    return asins;
+}
     function getDetailToken() {
         const zytoken = getZyToken();
         if (!zytoken) {
