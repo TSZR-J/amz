@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         亚马逊店铺商品筛选工具
 // @namespace    amazon-store-filter-multicountry
-// @version      6.2
+// @version      6.3
 // @description  解析URL中的seller编码，多国家销量查询，可视化表格展示筛选结果，支持本地缓存
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
 // @updateURL    https://raw.githubusercontent.com/TSZR-J/amz/main/亚马逊店铺商品筛选工具.user.js
@@ -1139,38 +1139,96 @@ async function fetchPageAsins(storeId, page, retryCount=0) {
     function getFingerId() {
         return GM_getValue("zying_fingerid", `auto_${Math.random().toString(36).substr(2, 16)}`);
     }
-    // 【修改】包裹retryOn429，实现429自动重登重试
-    async function getBatchSalesData(asins, cc) {
-        return await retryOn429(async () => {
-            const token = getDetailToken();
-            if (!asins.length) return {};
-            const ts = String(Math.floor(Date.now() / 1000));
-            const data = JSON.stringify({ abbr: cc, pagesize: 200, keys: asins });
-            const path = "/api/CmdHandler?cmd=zscout_asin.list";
-            const signStr = data + "POST" + path + ts + token + "v1";
-            const sign = CryptoJS.HmacSHA256(signStr, "https://amazon.zying.net").toString(CryptoJS.enc.Hex);
-            const r = await gmRequest({
-                method: 'POST',
-                url: 'https://amazon.zying.net' + path,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Token': token,
-                    'Version': 'v1',
-                    'Signature': sign,
-                    'Timestamp': ts
-                },
-                data,
-                timeout: 15000
-            });
-            const j = JSON.parse(r.responseText);
-            if (j.code === 401) { handleZyLoginExpired(); return {}; }
-            const map = {};
-            (j.data?.list || []).forEach(it => {
-                map[it.asin] = { sales: it.sales || 0, thumb: it.thumb || '', title: it.title || '' };
-            });
-            return map;
+// 【最终修改】自动优先 V2 销量，<30/空/0 则降级使用旧接口
+async function getBatchSalesData(asins, cc) {
+    return await retryOn429(async () => {
+        const token = getDetailToken();
+        if (!asins.length) return {};
+
+        // ==========================
+        // 1. 先调用 V2 接口（优先）
+        // ==========================
+        let v2Res;
+        try {
+            v2Res = await getBatchAsinDetail(asins, cc);
+        } catch (e) {
+            v2Res = { code: 500 };
+        }
+
+        // ==========================
+        // 2. 构建 V2 销量映射
+        // ==========================
+        const v2SalesMap = {};
+        if (v2Res?.code === 200 && v2Res.data) {
+            for (const asin of asins) {
+                const sales = v2Res.data[asin]?.Sales;
+                v2SalesMap[asin] = sales;
+            }
+        }
+
+        // ==========================
+        // 3. 调用旧接口（备用）
+        // ==========================
+        const ts = String(Math.floor(Date.now() / 1000));
+        const data = JSON.stringify({ abbr: cc, pagesize: 200, keys: asins });
+        const path = "/api/CmdHandler?cmd=zscout_asin.list";
+        const signStr = data + "POST" + path + ts + token + "v1";
+        const sign = CryptoJS.HmacSHA256(signStr, "https://amazon.zying.net").toString(CryptoJS.enc.Hex);
+
+        const r = await gmRequest({
+            method: 'POST',
+            url: 'https://amazon.zying.net' + path,
+            headers: {
+                'Content-Type': 'application/json',
+                'Token': token,
+                'Version': 'v1',
+                'Signature': sign,
+                'Timestamp': ts
+            },
+            data,
+            timeout: 15000
         });
-    }
+
+        const j = JSON.parse(r.responseText);
+        if (j.code === 401) { handleZyLoginExpired(); return {}; }
+
+        // ==========================
+        // 4. 最终销量：V2 有效则用 V2，否则用旧接口
+        // ==========================
+        const map = {};
+        (j.data?.list || []).forEach(it => {
+            const asin = it.asin;
+            const v2Sales = v2SalesMap[asin];
+
+            let finalSales;
+
+            // ==============================================
+            // 👇 你要的核心判断逻辑
+            // ==============================================
+            if (
+                v2Sales == null       // 空
+                || v2Sales === ""     // 空字符串
+                || v2Sales === 0      // 0
+                || v2Sales < 30       // 小于30
+                || v2Sales === "<30"  // 字符串<30
+            ) {
+                // 不满足 → 用旧接口销量
+                finalSales = it.sales || 0;
+            } else {
+                // 满足 → 用 V2 销量
+                finalSales = v2Sales;
+            }
+
+            map[asin] = {
+                sales: finalSales,
+                thumb: it.thumb || '',
+                title: it.title || ''
+            };
+        });
+
+        return map;
+    });
+}
     // 【修改】包裹retryOn429，移除原429终止逻辑，实现自动重登重试
     async function getBatchAsinDetail(asins, cc, retryCount = 0) {
         return await retryOn429(async () => {
