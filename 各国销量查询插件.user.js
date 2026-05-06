@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         各国销量查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.7
+// @version      1.0.8
 // @description  查询各国销量（批量请求优化版）
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/各国销量查询插件.user.js
@@ -217,98 +217,172 @@
         }
         return [];
     }
+// 5. 发送批量ASIN请求（核心修改：一次性发送多个ASIN + V2优先 + 兼容<30）
+async function sendBatchAsinRequest(site, asinList, asinItemMap) {
+    let Token = GM_getValue("token", "");
+    if (!Token) {
+        console.warn('未获取到有效Token，请求可能失败');
+    }
 
-    // 5. 发送批量ASIN请求（核心修改：一次性发送多个ASIN）
-    function sendBatchAsinRequest(site, asinList, asinItemMap) {
-        // 获取token
-        let Token = GM_getValue("token", "");
-        if (!Token) {
-            console.warn(' 未获取到有效Token，请求可能失败');
-        }
+    const Version = "v1";
+    const host = "https://amazon.zying.net";
+    const country = site.code;
 
-        // 获取时间戳
-        let Timestamp = Math.round(new Date().getTime() / 1e3).toString();
+    // ========================================================================
+    // 第一步：优先请求 V2 批量接口
+    // ========================================================================
+    let v2ResultMap = {};
+    let useV2Success = false;
 
-        // 关键修改：data中的keys传入批量ASIN数组
-        let data = JSON.stringify({
-            abbr: site.code,
-            pagesize: 100, // 可根据实际需求调整，确保大于asinList长度
-            keys: asinList // 批量ASIN数组，替代原单个ASIN
+    try {
+        const ts = Math.round(Date.now() / 1000) + "";
+        const data = JSON.stringify(asinList.map(a => ({ asin: a })));
+        const path = `/api/zbig/MoreAboutAsin/v2/${country}`;
+        const signStr = data + "POST" + path + ts + Token + Version;
+        const sign = CryptoJS.HmacSHA256(signStr, host).toString(CryptoJS.enc.Hex);
+
+        const res = await new Promise((resolve, reject) => {
+            GM.xmlHttpRequest({
+                method: "POST",
+                url: host + path,
+                data: data,
+                headers: {
+                    "Content-Type": "application/json",
+                    Token: Token,
+                    Version: Version,
+                    Signature: sign,
+                    Timestamp: ts
+                },
+                timeout: 15000,
+                onload: resolve,
+                onerror: reject
+            });
         });
 
-        // 获取版本
-        let Version = "v1";
+        // 401 / 429 直接登录失效
+        if (res.status === 401 || res.status === 429) {
+            asinItemMap.forEach((item, asin) => {
+                addAsinLabel("https://amazon.zying.net/#/login", item, asin, "智赢插件登录失效，请跳转重新登录", 0);
+            });
+            return;
+        }
 
-        // 获取url
-        let post_url = "https://amazon.zying.net";
+        if (res.status === 200) {
+            const j = JSON.parse(res.responseText);
 
-        // 获取请求方法
-        let post_method = "POST";
+            // body 401/429
+            if (j.code === 401 || j.code === 429) {
+                asinItemMap.forEach((item, asin) => {
+                    addAsinLabel("https://amazon.zying.net/#/login", item, asin, "智赢插件登录失效，请跳转重新登录", 0);
+                });
+                return;
+            }
 
-        // 组装验签字符串
-        let Signature = data + post_method + "/api/CmdHandler?cmd=zscout_asin.list" + Timestamp + Token + Version;
+            if (j.code === 200 && j.data) {
+                useV2Success = true;
+                for (let asin of asinList) {
+                    const info = j.data[asin];
+                    if (!info) continue;
 
-        // 验签
-        Signature = CryptoJS.HmacSHA256(Signature, post_url).toString(CryptoJS.enc.Hex);
+                    let sales = info.Sales;
+                    let validSales = 0;
+
+                    if (sales === "<30" || sales === "< 30") {
+                        validSales = 0; // 走旧接口
+                    } else {
+                        const num = Number(sales);
+                        if (!isNaN(num) && num >= 30) {
+                            validSales = num;
+                        }
+                    }
+                    v2ResultMap[asin] = validSales;
+                }
+            }
+        }
+    } catch (e) {
+        console.error("V2 批量接口异常", e);
+        useV2Success = false;
+    }
+
+    // ========================================================================
+    // 第二步：V2 不可用 → 调用旧批量接口
+    // ========================================================================
+    if (!useV2Success) {
+        const Timestamp = Math.round(new Date().getTime() / 1e3).toString();
+        const oldData = JSON.stringify({
+            abbr: site.code,
+            pagesize: 100,
+            keys: asinList
+        });
+
+        const signPath = "/api/CmdHandler?cmd=zscout_asin.list";
+        let Signature = oldData + "POST" + signPath + Timestamp + Token + Version;
+        Signature = CryptoJS.HmacSHA256(Signature, host).toString(CryptoJS.enc.Hex);
 
         GM.xmlHttpRequest({
             method: 'POST',
-            url: 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list',
+            url: host + signPath,
             headers: {
                 'Content-Type': 'application/json',
-                'Cookie': document.cookie,
                 'Token': Token,
                 'Version': Version,
                 'Signature': Signature,
                 'Timestamp': Timestamp
             },
-            data: data,
-            onload: function(response) {
-                let responseData = JSON.parse(response.responseText);
+            data: oldData,
+            onload: function (response) {
+                try {
+                    let responseData = JSON.parse(response.responseText);
+                    if (responseData.code === 401) {
+                        asinItemMap.forEach((item, asin) => {
+                            addAsinLabel("https://amazon.zying.net/#/login", item, asin, '智赢插件登录失效，请跳转重新登录', 0);
+                        });
+                        return;
+                    }
 
-                // 处理登录失效
-                if (responseData.code === 401) {
-                    // 遍历所有item，添加登录失效提示
-                    asinItemMap.forEach((item, asin) => {
-                        addAsinLabel("https://amazon.zying.net/#/login", item, asin, '智赢插件登录失效，请跳转重新登录', 0);
+                    const batchSalesList = getBatchSalesData(responseData);
+                    batchSalesList.forEach(salesItem => {
+                        const currentAsin = salesItem.asin;
+                        const salesValue = salesItem.sales || 0;
+                        if (asinItemMap.has(currentAsin)) {
+                            const targetItem = asinItemMap.get(currentAsin);
+                            addAsinLabel(site.add, targetItem, currentAsin, site.name, salesValue);
+                        }
                     });
-                    return;
+
+                    asinList.forEach(asin => {
+                        if (!batchSalesList.some(item => item.asin === asin)) {
+                            const targetItem = asinItemMap.get(asin);
+                            addAsinLabel(site.add, targetItem, asin, site.name, 0);
+                        }
+                    });
+                } catch (e) {
+                    asinItemMap.forEach((item, asin) => {
+                        addAsinLabel(site.add, item, asin, site.name, 0);
+                    });
                 }
-
-                // 处理接口返回成功，获取批量销量数据数组
-                const batchSalesList = getBatchSalesData(responseData);
-                console.log(` 站点${site.name}批量返回结果:`, batchSalesList);
-
-                // 关键修改3：遍历批量结果，通过ASIN匹配对应的item，添加标签
-                batchSalesList.forEach(salesItem => {
-                    const currentAsin = salesItem.asin; // 接口返回结果中的ASIN（需确认接口返回字段为asin，若不一致请调整）
-                    const salesValue = salesItem.sales || 0; // 提取对应销量
-
-                    // 匹配预存的item
-                    if (asinItemMap.has(currentAsin)) {
-                        const targetItem = asinItemMap.get(currentAsin);
-                        // 执行标签添加逻辑
-                        addAsinLabel(site.add, targetItem, currentAsin, site.name, salesValue);
-                    }
-                });
-
-                // 处理接口返回中没有的ASIN（销量默认为0）
-                asinList.forEach(asin => {
-                    if (!batchSalesList.some(item => item.asin === asin)) {
-                        const targetItem = asinItemMap.get(asin);
-                        addAsinLabel(site.add, targetItem, asin, site.name, 0);
-                    }
-                });
             },
-            onerror: function(error) {
-                console.error(` 站点${site.name}批量请求失败:`, error);
-                // 请求失败时，给所有item添加默认0销量标签
+            onerror: function (error) {
+                console.error(`站点${site.name}批量请求失败:`, error);
                 asinItemMap.forEach((item, asin) => {
                     addAsinLabel(site.add, item, asin, site.name, 0);
                 });
             }
         });
+        return;
     }
+
+    // ========================================================================
+    // 第三步：使用 V2 有效销量，不足的显示 0
+    // ========================================================================
+    for (let asin of asinList) {
+        const sales = v2ResultMap[asin] || 0;
+        const item = asinItemMap.get(asin);
+        if (item) {
+            addAsinLabel(site.add, item, asin, site.name, sales);
+        }
+    }
+}
 
     // 6. 页面加载完成后执行
     window.addEventListener('load', init);
