@@ -2,7 +2,7 @@
 // ==UserScript==
 // @name         店铺查询插件
 // @namespace    http://tampermonkey.net/
-// @version      1.0.18
+// @version      1.0.19
 // @description  查询是否有跟卖店铺
 // @author       LHH
 // @downloadURL  https://raw.githubusercontent.com/TSZR-J/amz/main/店铺查询插件.user.js
@@ -241,60 +241,125 @@
 
         return sales;
     }
-    function sendAsinRequest(amazonSites,item, asin) {
-        //获取token
-        let Token =GM_getValue("token", "");
-        //获取时间戳
-        let Timestamp = Math.round(new Date().getTime() / 1e3).toString();
-        //获取data
-        let data = JSON.stringify({
-            abbr: amazonSites.code,
-            pagesize: 100,
-            keys: [asin]
-        });
-        //获取版本
+ async function sendAsinRequest(amazonSites, item, asin) {
+    try {
+        let Token = GM_getValue("token", "");
         let Version = "v1";
-        //获取url
-        let post_url = "https://amazon.zying.net";
-        //获取请求方法
-        let post_method = "POST"
-        //组装验签字符串
-        let Signature = data+post_method+"/api/CmdHandler?cmd=zscout_asin.list"+Timestamp+Token+Version;
-        //验签
-        Signature = CryptoJS.HmacSHA256(Signature, post_url).toString(CryptoJS.enc.Hex);
-        //
+        let host = "https://amazon.zying.net";
+        let country = amazonSites.code;
+        let finalSales = 0;
 
-        GM.xmlHttpRequest({
-            method: 'POST',
-            url: 'https://amazon.zying.net/api/CmdHandler?cmd=zscout_asin.list',
-            headers: {
-                'Content-Type': 'application/json',
-                'Cookie': document.cookie,
-                'Token':Token,
-                'Version':Version,
-                'Signature':Signature,
-                'Timestamp':Timestamp
-            },
-            data: data,
-            onload: function(response) {
-                //console.log(`API  response for ASIN ${asin}:`, response.responseText);
-                let data = JSON.parse(response.responseText);
-                if(data.code === 401)
-                {
-                    addAsinLabel("https://amazon.zying.net/#/login",item, asin,'智赢插件登录失效，请跳转重新登录',0);
+        // ==========================
+        // 1. 优先请求 V2 新接口
+        // ==========================
+        try {
+            const ts = Math.round(Date.now() / 1000) + "";
+            const data = JSON.stringify([{ asin: asin }]);
+            const path = `/api/zbig/MoreAboutAsin/v2/${country}`;
+            const signStr = data + "POST" + path + ts + Token + Version;
+            const sign = CryptoJS.HmacSHA256(signStr, host).toString(CryptoJS.enc.Hex);
+
+            const res = await new Promise((resolve) => {
+                GM.xmlHttpRequest({
+                    method: "POST",
+                    url: host + path,
+                    data: data,
+                    headers: {
+                        "Content-Type": "application/json",
+                        Token: Token,
+                        Version: Version,
+                        Signature: sign,
+                        Timestamp: ts
+                    },
+                    timeout: 10000,
+                    onload: resolve,
+                    onerror: () => resolve({ status: 0 })
+                });
+            });
+
+            // 401 / 429 直接返回登录失效
+            if (res.status === 401 || res.status === 429) {
+                addAsinLabel("https://amazon.zying.net/#/login", item, asin, "智赢插件登录失效，请跳转重新登录", 0);
+                return;
+            }
+
+            if (res.status === 200) {
+                const j = JSON.parse(res.responseText);
+
+                // body 里 401/429 也失效
+                if (j.code === 401 || j.code === 429) {
+                    addAsinLabel("https://amazon.zying.net/#/login", item, asin, "智赢插件登录失效，请跳转重新登录", 0);
                     return;
                 }
-                // 执行解析并打印结果
-                const salesValue = getSalesData(data);
-                // console.log(`销量:`, salesValue);
-                // 添加蓝色ASIN标签
-                addAsinLabel(amazonSites.add,item, asin,amazonSites.name,salesValue);
-            },
-            onerror: function(error) {
-                console.error(`Request  failed for ASIN ${asin}:`, error);
+
+                if (j.code === 200 && j.data && j.data[asin]) {
+                    let sales = j.data[asin].Sales;
+
+                    // ==========================
+                    // 👇 兼容 <30 字符串
+                    // ==========================
+                    if (sales === "<30" || sales === "< 30") {
+                        finalSales = 0; // 强制走旧接口
+                    } else {
+                        let numSales = Number(sales);
+                        if (!isNaN(numSales) && numSales >= 30) {
+                            finalSales = numSales;
+                        }
+                    }
+                }
             }
-        });
+        } catch (e) {}
+
+        // ==========================
+        // 2. V2 不满足 → 用旧接口
+        // ==========================
+        if (finalSales <= 0) {
+            const ts = Math.round(Date.now() / 1000) + "";
+            const oldData = JSON.stringify({
+                abbr: amazonSites.code,
+                pagesize: 100,
+                keys: [asin]
+            });
+            const signPath = "/api/CmdHandler?cmd=zscout_asin.list";
+            const signStr = oldData + "POST" + signPath + ts + Token + Version;
+            const sign = CryptoJS.HmacSHA256(signStr, host).toString(CryptoJS.enc.Hex);
+
+            const oldRes = await new Promise((resolve) => {
+                GM.xmlHttpRequest({
+                    method: "POST",
+                    url: host + signPath,
+                    data: oldData,
+                    headers: {
+                        "Content-Type": "application/json",
+                        Token: Token,
+                        Version: Version,
+                        Signature: sign,
+                        Timestamp: ts
+                    },
+                    onload: resolve,
+                    onerror: () => resolve({ status: 0 })
+                });
+            });
+
+            try {
+                const d = JSON.parse(oldRes.responseText);
+                if (d.code === 401) {
+                    addAsinLabel("https://amazon.zying.net/#/login", item, asin, "智赢插件登录失效，请跳转重新登录", 0);
+                    return;
+                }
+                finalSales = getSalesData(d) || 0;
+            } catch (e) {
+                finalSales = 0;
+            }
+        }
+
+        // 最终显示
+        addAsinLabel(amazonSites.add, item, asin, amazonSites.name, finalSales);
+
+    } catch (e) {
+        console.error("sendAsinRequest 异常", e);
     }
+}
     // 目标元素ID
     const TARGET_ID = 'productTitle';
     // 按钮配置
